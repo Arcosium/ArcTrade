@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from unittest.mock import patch
 from autofolio import datasets as module
 
@@ -26,7 +27,11 @@ def test_cache(monkeypatch):
         assert module.datasets()==module.datasets()
         assert build.call_count==1
         monkeypatch.setattr(module,'_CACHE_AT',-10000)
-        module.datasets()
+        # An aged inventory is returned immediately and rebuilt behind the reader.
+        assert module.datasets()=={'datasets':[]}
+        for _ in range(200):
+            if build.call_count==2:break
+            time.sleep(.01)
         assert build.call_count==2
 
 

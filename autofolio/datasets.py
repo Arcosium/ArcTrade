@@ -173,9 +173,18 @@ def inventory():
     return dict(datasets=result)
 
 
-def datasets():
+def _refresh():
     global _CACHE,_CACHE_AT
     with _LOCK:
         if _CACHE is None or time.monotonic()-_CACHE_AT>CACHE_SECONDS:
             _CACHE=inventory();_CACHE_AT=time.monotonic()
         return _CACHE
+
+
+def datasets():
+    """The inventory walks every partition folder for several seconds, so an aged
+    copy is served at once while a single background pass replaces it."""
+    if _CACHE is None:return _refresh()
+    if time.monotonic()-_CACHE_AT>CACHE_SECONDS and not _LOCK.locked():
+        threading.Thread(target=_refresh,daemon=True).start()
+    return _CACHE

@@ -59,6 +59,23 @@ def test_ingest_pinned_trial_after_calendar_moves(tmp_path,monkeypatch):
     assert catalogue.ingest_file(path,path.stat())==('unmatched',0)
 
 
+def test_rows_follow_new_changed_and_removed_summaries(tmp_path,monkeypatch):
+    monkeypatch.setattr(store,'DB',tmp_path/'index.db');monkeypatch.setattr(store,'DATA',tmp_path)
+    store.initialize()
+    def put(identity,title,stamp):
+        payload=dict(id=identity,title=title,cases=[1],performance={'os':{'months':9,'monthly':[1]}})
+        with store.connect() as db:
+            db.execute('INSERT INTO strategies VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated=excluded.updated',
+                       (identity,title,'family','cohort',json.dumps(payload),identity,stamp))
+    put('a','first',1000.)
+    # Books and monthly series stay in the database; list views receive the summary.
+    assert catalogue.rows()==[dict(id='a',title='first',performance={'os':{'months':9}})]
+    put('b','second',1001.);put('a','renamed',1002.)
+    assert sorted(r['title'] for r in catalogue.rows())==['renamed','second']
+    with store.connect() as db:db.execute("DELETE FROM strategies WHERE id='a'")
+    assert [r['id'] for r in catalogue.rows()]==['b']
+
+
 def test_queued_trial_rolls_but_running_trial_keeps_its_window(tmp_path,monkeypatch):
     from autofolio import research,learning
     monkeypatch.setattr(store,'DB',tmp_path/'state.db');monkeypatch.setattr(store,'DATA',tmp_path)

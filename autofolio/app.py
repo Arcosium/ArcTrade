@@ -2,12 +2,14 @@
 import asyncio
 import contextlib
 import calendar
+import hashlib
 import json
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from .config import ROOT, RUNS, ARC
 from .store import initialize, connect, setting
@@ -52,20 +54,24 @@ async def headers(request,call_next):
     return response
 
 
+# Added last so it wraps every response; the tunnel uplink otherwise carries plain JSON.
+app.add_middleware(GZipMiddleware,minimum_size=1024,compresslevel=6)
+
+
 @app.get('/')
 @app.get('/strategy/{identity}')
 def index(identity=None):return FileResponse(ROOT/'static/index.html')
 
 
 @app.get('/api/leaderboard')
-def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",pattern="^(kr|us|crypto|timefolio)$")):
+def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",pattern="^(kr|us|crypto|timefolio)$"),known:str|None=Query(None,max_length=40)):
     from .evaluation import selection_metrics
-    all_rows=[]
+    all_rows=[];learned_only=setting('labs_v2_enabled',False)
     for r in rows():
         if not research.visible(r,user(request),market):continue
         span=qualified_window(r);metric=selection_metrics(r)
         if not span or not metric:continue
-        if setting('labs_v2_enabled',False) and (r.get('genome') or {}).get('engine')!='learned_v1':continue
+        if learned_only and (r.get('genome') or {}).get('engine')!='learned_v1':continue
         all_rows.append(dict(r,**{k:v for k,v in metric.items() if k!='monthly'},
                              evaluation_window=list(span),evaluation_months=36,selection_scope='os'))
     cohorts={}
@@ -77,17 +83,22 @@ def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",patt
     front={r['id'] for r in pareto_front(chosen)}
     screened=[r for r in chosen if r.get('rule_screen_pass')]
     valid_front={r['id'] for r in pareto_front(screened)}
-    points=[{k:v for k,v in r.items() if k not in ['cases','source_digest','limitations','genome']} |
+    # The strategy page reads segment tables and contest checks from /api/strategy;
+    # the genome stays so the board can tell same-named trials apart.
+    points=[{k:v for k,v in r.items() if k not in ['cases','source_digest','limitations','performance','contest_validation']} |
             dict(pareto=r['id'] in front,screened_pareto=r['id'] in valid_front) for r in chosen]
     points.sort(key=lambda r:(-r['net_return'],r['negative_months']))
     from .map_references import references
     mapped=references(market,user(request),chosen)
     for point in points:point['applied_targets']=mapped['assignments'].get(point['id'],[])
-    return dict(cohort=selected,cohorts=cohorts,strategies=points,total=len(all_rows),
+    board=dict(cohort=selected,cohorts=cohorts,strategies=points,total=len(all_rows),
                 references=mapped['points'],
                 frontier=[r['id'] for r in pareto_front(chosen)],
                 screened_frontier=[r['id'] for r in pareto_front(screened)],
                 period_label=((' ~ '.join([chosen[0]['start'],chosen[0]['end']])+' · OS 9개월') if chosen else 'OS 9개월 · 첫 검증 대기'), comparison='OS 9개월',selection_scope='os',protocol=research.protocol(market))
+    # The map polls every few seconds; an unchanged board is answered without its body.
+    version=hashlib.sha256(json.dumps(board,sort_keys=True,default=str).encode()).hexdigest()[:20]
+    return dict(unchanged=True,version=version) if known==version else dict(board,version=version)
 
 
 def qualified_window(summary):

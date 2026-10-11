@@ -4,9 +4,11 @@ import json
 import math
 import os
 import statistics
+import threading
 import time
 from functools import lru_cache
 from pathlib import Path
+from . import store
 from .config import REPORT_ROOTS
 from .metrics import evaluation_scope, ledger, normalized_date, statistics_for
 from .store import connect, event, setting, set_setting
@@ -210,12 +212,33 @@ def refresh():
     return counts
 
 
+# Per-case books and monthly series are most of a payload and no list view reads them.
+SUMMARY=("json_remove(payload,'$.cases','$.contest_validation.cases','$.contest_validation.weekly',"
+         "'$.performance.is.monthly','$.performance.os.monthly','$.performance.ros.monthly')")
+_SUMMARIES={}
+_SUMMARY_LOCK=threading.Lock()
+
+
 def rows(cohort=None):
-    with connect() as db:
-        query='SELECT payload FROM strategies'+(' WHERE cohort=?' if cohort else '')
-        found=db.execute(query,(cohort,) if cohort else ()).fetchall()
-    return [json.loads(r['payload']) for r in found
-            if not any(s in json.loads(r['payload']).get('source_name','') for s in ['capital_audit_failure','repair_response'])]
+    """Strategy summaries; strategy_case() reads a complete record.
+
+    Parsed summaries stay in memory and only rows written since the last call are
+    read again. The dictionaries are shared between callers: copy before changing one.
+    """
+    key=str(store.DB)
+    with _SUMMARY_LOCK,connect() as db:
+        db.execute('BEGIN')  # one snapshot for the probe and the rows it describes
+        count,latest=db.execute('SELECT count(*),max(updated) FROM strategies').fetchone()
+        seen=_SUMMARIES.get(key)
+        if not seen or seen[:2]!=(count,latest):
+            def load(since):
+                return {r[0]:json.loads(r[1]) for r in db.execute(f'SELECT id,{SUMMARY} FROM strategies WHERE updated>?',(since,))}
+            # Overlap the previous probe: a slower writer may commit an older timestamp later.
+            found=dict(seen[2],**load((seen[1] or 0)-300)) if seen else load(-1)
+            if len(found)!=count:found=load(-1)
+            seen=_SUMMARIES[key]=(count,latest,found)
+    return [r for r in seen[2].values() if (not cohort or r.get('cohort')==cohort)
+            and not any(s in r.get('source_name','') for s in ['capital_audit_failure','repair_response'])]
 
 
 @lru_cache(maxsize=4)

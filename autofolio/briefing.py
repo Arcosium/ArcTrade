@@ -18,6 +18,7 @@ from fastapi import APIRouter, Request
 from .auth import user
 from . import period, research
 from .store import connect
+from .catalogue import SUMMARY
 from .evaluation import selection_metrics
 
 router = APIRouter()
@@ -171,8 +172,10 @@ def discoveries(person, now=None):
     items = []
     try:
         with connect() as db:
+            # Rank by identifier first: carrying every payload through the grouping
+            # copied the whole strategy table on each visit.
             completed = db.execute("""
-                SELECT s.payload, MAX(e.timestamp) completed
+                SELECT s.id, MAX(e.timestamp) completed
                 FROM events e JOIN alpha_candidates a
                   ON a.id=json_extract(CASE WHEN json_valid(e.body) THEN e.body ELSE '{}' END,'$.job')
                 JOIN strategies s ON s.source=a.result
@@ -180,23 +183,26 @@ def discoveries(person, now=None):
                   AND a.status='done' AND a.user_id=?
                 GROUP BY s.id ORDER BY completed DESC LIMIT 512
             """, (now - 7 * 86400, now, person['id'])).fetchall()
-        for record in completed:
-            value = json.loads(record['payload'])
-            if not research.visible(value, person) or not period.accepts(value):
-                continue
-            if (value.get('genome') or {}).get('engine') != 'learned_v1':
-                continue
-            metric=selection_metrics(value)
-            if metric is None:continue
-            value=dict(value,**{k:metric.get(k) for k in ('net_return','sharpe','negative_months')})
-            if not all(finite(value.get(k)) for k in ('net_return', 'sharpe', 'negative_months')):
-                continue
-            if value['net_return'] <= 0 or value['sharpe'] < 1 or value['negative_months'] > 3:
-                continue
-            items.append(dict((key, value.get(key)) for key in ('id', 'title', 'market', 'net_return', 'sharpe', 'negative_months')) |
-                         dict(discovered_at=iso(record['completed'])))
-            if len(items) == 8:
-                break
+            for record in completed:
+                found = db.execute(f'SELECT {SUMMARY} FROM strategies WHERE id=?', (record['id'],)).fetchone()
+                if not found:
+                    continue
+                value = json.loads(found[0])
+                if not research.visible(value, person) or not period.accepts(value):
+                    continue
+                if (value.get('genome') or {}).get('engine') != 'learned_v1':
+                    continue
+                metric=selection_metrics(value)
+                if metric is None:continue
+                value=dict(value,**{k:metric.get(k) for k in ('net_return','sharpe','negative_months')})
+                if not all(finite(value.get(k)) for k in ('net_return', 'sharpe', 'negative_months')):
+                    continue
+                if value['net_return'] <= 0 or value['sharpe'] < 1 or value['negative_months'] > 3:
+                    continue
+                items.append(dict((key, value.get(key)) for key in ('id', 'title', 'market', 'net_return', 'sharpe', 'negative_months')) |
+                             dict(discovered_at=iso(record['completed'])))
+                if len(items) == 8:
+                    break
     except (sqlite3.Error, ValueError, TypeError):
         return dict(items=[], status='unavailable', criteria=CRITERIA, message='연구 완료 기록을 불러오지 못했습니다.')
     return dict(items=items, status='ok' if items else 'empty', criteria=CRITERIA,

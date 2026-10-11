@@ -118,7 +118,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 request.state.user = dict(row)
         public = request.url.path in {'/login', '/api/auth/login', '/api/auth/register',
                                      '/static/login.html', '/static/login.js', '/static/login.css',
-                                     '/static/observatory.png'} or request.url.path.startswith('/static/fonts/')
+                                     '/static/observatory.png', '/static/observatory.webp'} or request.url.path.startswith('/static/fonts/')
         if not public and not request.state.user:
             if request.url.path.startswith('/api/'):
                 return JSONResponse({'detail': '로그인이 필요합니다.'}, status_code=401)
@@ -129,7 +129,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             except HTTPException as exc:
                 return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)
         response = await call_next(request)
-        response.headers['Cache-Control'] = 'no-store'
+        path = request.url.path
+        if not path.startswith('/static/') or response.status_code >= 400:
+            response.headers['Cache-Control'] = 'no-store'
+        elif path.startswith('/static/fonts/') or 'v' in request.query_params:
+            # Font files are never edited in place; other assets are requested with a ?v= stamp.
+            response.headers['Cache-Control'] = ('public' if public else 'private') + ', max-age=31536000, immutable'
+        else:
+            response.headers['Cache-Control'] = 'no-cache'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'

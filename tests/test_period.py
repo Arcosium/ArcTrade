@@ -41,3 +41,18 @@ def test_kst_midnight_does_not_seal_open_us_or_crypto_day():
     assert period.last_complete_date('us',now)=='20261006'
     assert period.last_complete_date('kr',now)=='20261007'
     assert period.last_complete_date('us',datetime(2026,10,7,21,tzinfo=timezone.utc))=='20261007'
+
+
+def test_calendars_built_at_the_same_time_match_serial_ones():
+    import threading
+    spans=[period.window(date(2026,10,day)) for day in (9,10,11)]
+    jobs=[(market,span) for span in spans for market in ('kr','us')]
+    built,failed={},[]
+    def build(market,span):
+        try:built[market,span]=len(period._exchange_calendar(market,*span).sessions)
+        except Exception as exc:failed.append(exc)
+    threads=[threading.Thread(target=build,args=job) for job in jobs]
+    for thread in threads:thread.start()
+    for thread in threads:thread.join()
+    assert not failed
+    assert built=={job:len(period._exchange_calendar(*job[:1],*job[1]).sessions) for job in jobs}

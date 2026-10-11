@@ -1,5 +1,6 @@
 """Daily rolling 36-month windows, pinned throughout each immutable trial."""
 import calendar
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime,date,timedelta,timezone
@@ -8,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 
 _WINDOW=ContextVar('evaluation_window',default=None)
+_CALENDAR_LOCK=threading.Lock()
 
 
 @contextmanager
@@ -35,10 +37,14 @@ def _exchange_calendar(market,start,end):
         from pathlib import Path
         sys.path.insert(0,str(Path.home()/'vault/QuantInSight/python-deps'))
         import exchange_calendars as calendars
-    return calendars.get_calendar('XNYS' if market=='us' else 'XKRX',start=start,end=end)
+    # The library builds calendars through shared state: concurrent calls raised or
+    # came back with a different session count, and expected_dates() would keep that.
+    with _CALENDAR_LOCK:return calendars.get_calendar('XNYS' if market=='us' else 'XKRX',start=start,end=end)
 
 
-@lru_cache(maxsize=16)
+# Every pinned window of every market stays listed, and a calendar takes about half
+# a second to build: 16 entries were evicted within one pass over the four boards.
+@lru_cache(maxsize=256)
 def expected_dates(market,start,end):
     if market=='crypto':
         first=datetime.strptime(start,'%Y%m%d').date();last=datetime.strptime(end,'%Y%m%d').date()

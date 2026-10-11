@@ -28,6 +28,10 @@ def initialize():
           updated REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS strategies_cohort ON strategies(cohort);
+        -- Both columns sit behind the multi-kilobyte payload; without these a change
+        -- probe or a join by result file reads every payload.
+        CREATE INDEX IF NOT EXISTS strategies_updated ON strategies(updated);
+        CREATE INDEX IF NOT EXISTS strategies_source ON strategies(source,id);
         CREATE TABLE IF NOT EXISTS sources (
           path TEXT PRIMARY KEY, mtime REAL, size INTEGER, digest TEXT, status TEXT
         );

@@ -83,6 +83,21 @@ class SiteTests(unittest.TestCase):
             self.assertEqual(payload['selection_scope'],'os')
             historical=self.client.get('/api/leaderboard',params={'market':'crypto','cohort':'cohort-'+older[1]}).json()
             self.assertEqual(len(historical['strategies']),3)
+            # Polling with the last version returns no body until the board changes.
+            self.assertNotIn('performance',payload['strategies'][0])
+            again=self.client.get('/api/leaderboard',params={'market':'crypto','known':payload['version']}).json()
+            self.assertEqual(again,{'unchanged':True,'version':payload['version']})
+            self.assertIn('strategies',self.client.get('/api/leaderboard',params={'market':'crypto','known':historical['version']}).json())
+
+    def test_versioned_assets_are_cached_and_pages_are_not(self):
+        cache=lambda path:self.client.get(path).headers['Cache-Control']
+        self.assertEqual(cache('/'),'no-store')
+        self.assertEqual(cache('/api/auth/me'),'no-store')
+        self.assertEqual(cache('/static/app.js?v=1'),'private, max-age=31536000, immutable')
+        self.assertEqual(cache('/static/login.css?v=1'),'public, max-age=31536000, immutable')
+        self.assertEqual(cache('/static/app.js'),'no-cache')
+        self.assertEqual(cache('/static/missing.js?v=1'),'no-store')
+        self.assertEqual(self.client.get('/static/app.js?v=1').headers['Content-Encoding'],'gzip')
 
     def test_detail_and_trades_default_to_os_and_keep_all_three_segments(self):
         from datetime import datetime

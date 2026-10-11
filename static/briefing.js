@@ -19,31 +19,28 @@ const marketBriefing=(()=>{
  }
  function charts(){
   const root=$('market-charts');root.replaceChildren();
-  for(const item of data.charts){const article=el('article',undefined,'market-instrument'),head=el('div',undefined,'instrument-heading'),title=el('h2',item.label),unit=el('span',item.id==='btc'?'USD':'지수','caption');head.append(title,unit);article.append(head);
-   const line=el('div',undefined,'instrument-value');line.append(el('strong',value(item.latest)),el('span',Number.isFinite(item.change_pct)?`${item.change_pct>0?'+':''}${item.change_pct.toFixed(2)}%`:'시세 확인 필요',item.change_pct>=0?'positive-change':'negative-change'));article.append(line);
+  for(const item of data.charts){const article=el('article',undefined,'market-instrument'),title=el('h2'),link=el('a',item.label);external(link,item.source_url);link.title=item.source;title.append(link);article.append(title);
+   const line=el('div',undefined,'instrument-value');line.append(el('strong',value(item.latest)),el('span',Number.isFinite(item.change_pct)?signed(item.change_pct/100):'시세 확인 필요',item.change_pct>=0?'positive-change':'negative-change'));article.append(line);
    const plot=el('div',undefined,'instrument-chart');article.append(plot);root.append(article);chart(plot,item);
-   const meta=el('p',item.as_of?`${tradeTime(item.as_of)} KST · ${item.status==='stale'?'갱신 지연':'최근 관측'}`:item.message,'caption');article.append(meta);
-   const source=el('a',item.source,'chart-source');external(source,item.source_url);article.append(source);
+   article.append(el('p',item.as_of?tradeTime(item.as_of)+(item.status==='stale'?' · 지연':''):item.message,'caption'));
   }
  }
  function news(){
   const container=$('today-news');container.replaceChildren();const rows=data.news.items.filter(r=>category==='all'||r.category===category);
-  $('news-status').textContent=data.news.message;
-  if(!rows.length){container.append(el('p','이 분류에 새로 수집된 기사가 없습니다.','empty-note'));return;}
-  for(const item of rows){const article=el('article',undefined,'news-item'),meta=el('p',`${categories[item.category]||'경제'} · ${item.source||'출처 확인'} · ${tradeTime(item.published_at||item.collected_at)}${item.published_at?'':' 수집'}`,'caption'),title=el('h3'),a=el('a',item.title);external(a,item.url);title.append(a);article.append(meta,title);if(item.summary)article.append(el('p',item.summary,'news-summary'));container.append(article);}
+  $('news-status').textContent=data.news.status==='ok'?'':data.news.message;
+  if(!rows.length){container.append(el('p','기사 없음','empty-note'));return;}
+  for(const item of rows){const article=el('article',undefined,'news-item'),meta=el('p',`${categories[item.category]||'경제'} · ${item.source||'출처 확인'} · ${tradeTime(item.published_at||item.collected_at)}${item.published_at?'':' 수집'}`,'caption'),title=el('h3'),a=el('a',item.title);external(a,item.url);title.append(a);if(item.summary)a.title=item.summary;article.append(meta,title);container.append(article);}
  }
  function discoveries(){
-  $('discoveries-criteria').textContent=data.discoveries.criteria;
+  $('discoveries-title').title=data.discoveries.criteria+' · '+data.discoveries.message;
   const root=$('today-discoveries');root.replaceChildren();
-  if(!data.discoveries.items.length)root.append(el('p',data.discoveries.status==='unavailable'?'연구 결과 연결을 확인하고 있습니다.':'아직 조건을 통과한 새 전략이 없습니다.','empty-note'));
+  if(!data.discoveries.items.length)root.append(el('p',data.discoveries.status==='unavailable'?'연결 확인 중':'새 전략 없음','empty-note'));
   for(const p of data.discoveries.items){const a=el('a',undefined,'discovery-item');a.href=`/strategy/${p.id}?market=${p.market}`;a.append(el('span',`${MARKET_NAMES[p.market]||p.market} · ${tradeTime(p.discovered_at)}`,'caption'),el('strong',p.title),el('span',`${percent(p.net_return)} · 샤프 ${decimal(p.sharpe)} · OS 손실 ${p.negative_months}/9개월`,'discovery-metrics'));root.append(a);}
-  root.append(el('p',data.discoveries.message,'caption'));
  }
  async function load(){
-  const seq=++sequence;busy=true;$('today-refresh').disabled=true;$('today-status').textContent='시장 자료를 불러오는 중입니다.';
+  const seq=++sequence;busy=true;$('today-refresh').disabled=true;$('today-status').textContent='';
   try{const result=await get('/api/briefing');if(seq!==sequence||state.tab!=='today')return;data=result;
    $('today-date').textContent=new Date(data.as_of).toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long',timeZone:'Asia/Seoul'});
-   $('today-status').textContent=`최근 3개월 일봉 · 변동률은 직전 관측 종가 대비 · ${tradeTime(data.as_of)} KST 조회`;
    charts();news();discoveries();
   }catch(e){if(seq===sequence&&state.tab==='today')$('today-status').textContent=e.message;}finally{if(seq===sequence){busy=false;$('today-refresh').disabled=false;}}
  }
