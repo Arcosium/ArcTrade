@@ -25,11 +25,23 @@ async def lifespan(app):
     async def automatic_deployments():
         from .auto_apply import tick
         from .store import event
+        last_timefolio_run=0.0
         while True:
             try:
                 await asyncio.to_thread(tick)
             except Exception as exc:
                 event('auto_apply_error',dict(message='자동 적용 점검 실패',error=str(exc)[:180]))
+            now=time.monotonic()
+            if now-last_timefolio_run>=60:
+                last_timefolio_run=now
+                try:
+                    from datetime import datetime
+                    from zoneinfo import ZoneInfo
+                    from .timefolio_live import market_open,run
+                    if market_open(datetime.now(ZoneInfo('Asia/Seoul'))):
+                        await asyncio.to_thread(run)
+                except Exception as exc:
+                    event('timefolio_execution_error',dict(message='타임폴리오 실행 점검 실패',error=type(exc).__name__))
             await asyncio.sleep(30)
     task=asyncio.create_task(automatic_deployments())
     yield

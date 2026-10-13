@@ -21,3 +21,16 @@ def test_auto_selects_configured_provider_without_exposing_key(monkeypatch):
 
 def json_text(value):
     return str(value)
+
+
+def test_local_system_prefix_precedes_changing_input(monkeypatch):
+    import json
+    sent=[]
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def read(self):return json.dumps({'choices':[{'message':{'content':'{}'}}]}).encode()
+    monkeypatch.setattr(llm.urllib.request,'urlopen',lambda request,**kw:sent.append(json.loads(request.data)) or Response())
+    for text in ('전략 A','전략 B'):llm.complete(text,provider='local',system='고정된 규칙표',json_mode=True)
+    assert sent[0]['messages'][0]==sent[1]['messages'][0]=={'role':'system','content':'고정된 규칙표'}
+    assert sent[0]['messages'][-1]!=sent[1]['messages'][-1]

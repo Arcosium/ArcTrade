@@ -22,8 +22,8 @@ _VALID_PORT = {"equal_weight", "market_cap", "momentum_weight", "risk_parity",
                "dynamic_asset", "all_in"}
 
 
-def _llm(prompt, *, provider=None, json_mode=False, max_tokens=8000):
-    return llm.complete(prompt, provider=provider, json_mode=json_mode, max_tokens=max_tokens)
+def _llm(prompt, *, provider=None, json_mode=False, max_tokens=8000, system=None):
+    return llm.complete(prompt, provider=provider, json_mode=json_mode, max_tokens=max_tokens, **({"system":system} if system else {}))
 
 
 # ── 진행률 (단일 실행 가정; thread-safe) ────────────────────────────────
@@ -101,8 +101,8 @@ A: {{"name":"수급 반전","summary":"재무 안정 종목의 수급과 과매�
 
 반드시 JSON 만:
 {{"name":"...","summary":"...","financial_logic":"...","buy_logic":"...","sell_logic":"...","period_months":24,"portfolio_strategy":"equal_weight","use_tax_fee":true,"risk_notes":"..."}}
-사용자 입력: {text}"""
-    raw, meta = _llm(sys, provider=provider, json_mode=True)
+"""
+    raw, meta = _llm(text, system=sys, provider=provider, json_mode=True)
     raw = raw.strip()
     try:
         p = json.loads(raw)

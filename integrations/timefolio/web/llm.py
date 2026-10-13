@@ -48,11 +48,11 @@ def _resolve(provider: str | None) -> tuple[str, str, str, str]:
 
 
 def complete(prompt: str, *, provider: str | None = None, json_mode: bool = False,
-             max_tokens: int = 8000) -> tuple[str, dict]:
+             max_tokens: int = 8000, system: str | None = None) -> tuple[str, dict]:
     name, base, key, model = _resolve(provider)
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}],
         "stream": False,
     }
     if name == "openai":

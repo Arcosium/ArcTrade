@@ -35,7 +35,8 @@ def save(uid,**body):
 def market_open(now):
     from .period import expected_dates
     day=now.strftime('%Y%m%d')
-    return (now.weekday()<5 and day in expected_dates('kr',day,day)
+    following=(now+timedelta(days=1)).strftime('%Y%m%d')
+    return (now.weekday()<5 and day in expected_dates('kr',day,following)
             and (9,1)<=(now.hour,now.minute)<(15,15))
 
 
@@ -161,6 +162,17 @@ def _advance(dep,now=None):
         positions=summary.get('positions',[])
         hold={p['ticker']:p['qty'] for p in positions};marks={p['ticker']:p['last_price'] for p in positions};entries={p['ticker']:p['avg_price'] for p in positions}
         previous=snapshot(uid)
+        # Keep the existing model idle until the user has manually exited the
+        # two positions currently blocking the account. Latch the first clear
+        # account observation so future model buys of either symbol are normal.
+        if not previous.get('manual_clearance_complete'):
+            base['manual_clearance_complete']=False
+            if not positions and not summary.get('no_holdings_visible'):
+                raise ValueError('보유 종목 확인 불가 · 수동 매도 완료 여부 판단 중지')
+            manual_positions=[p for p in positions if p.get('ticker') in {'005930','000660'} and int(p.get('qty') or 0)>0]
+            if manual_positions:
+                return save(uid,**base,status='waiting_manual_sale',message='삼성전자·SK하이닉스 수동 매도 확인 후 자동매매 시작')
+            base['manual_clearance_complete']=True
         from .period import expected_dates
         last_rebalance=previous.get('last_rebalance')
         elapsed=len(expected_dates('kr',last_rebalance,signal_day))-1 if last_rebalance and last_rebalance<=signal_day else 0
