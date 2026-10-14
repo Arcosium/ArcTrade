@@ -1,0 +1,11 @@
+[Unit]
+Description=ArcTrade minute paper cadence
+
+[Timer]
+OnBootSec=30
+OnUnitInactiveSec=30
+AccuracySec=1
+Unit=arctrade-minute-paper.service
+
+[Install]
+WantedBy=timers.target

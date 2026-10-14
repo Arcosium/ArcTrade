@@ -28,7 +28,7 @@ def test_daily_anchor_has_exactly_24_9_3_months_and_ros_cannot_change_os():
     assert phases['os']==changed['os']
     assert changed['ros']['net_return']!=phases['ros']['net_return']
     assert e.segment_metrics(rows,'20231008','20261007',36)['months']==36
-    assert e.selection_metrics({'evaluation_protocol':e.PROTOCOL,'performance':changed})==phases['os']
+    assert e.selection_metrics({'activity_validation':{'version':'os_activity_v1','passed':True},'evaluation_protocol':e.PROTOCOL,'performance':changed})==phases['os']
     assert e.selection_metrics({'performance':changed}) is None
 
 
@@ -57,6 +57,7 @@ def test_ingest_pinned_trial_after_calendar_moves(tmp_path,monkeypatch):
     # An incomplete final trading day must never pass by presenting split metrics.
     value['account']['daily'].pop();path.write_text(json.dumps(value))
     assert catalogue.ingest_file(path,path.stat())==('unmatched',0)
+    assert catalogue.rows()==[]
 
 
 def test_rows_follow_new_changed_and_removed_summaries(tmp_path,monkeypatch):

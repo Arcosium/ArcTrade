@@ -25,7 +25,7 @@ def ledger(case, start=None, end=None):
     return result
 
 
-def statistics_for(rows):
+def statistics_for(rows, annual_sessions=252):
     if not rows:
         raise ValueError('Empty account evaluation')
     daily = [r['net_daily_return'] for r in rows]
@@ -37,7 +37,7 @@ def statistics_for(rows):
     months = [dict(month=k, net_return=v[-1]['nav']/v[0]['previous_nav']-1,
                    start_nav=v[0]['previous_nav'], end_nav=v[-1]['nav']) for k,v in sorted(monthly.items())]
     deviation = statistics.stdev(daily) if len(daily)>1 else 0
-    sharpe = statistics.mean(daily)/deviation*math.sqrt(252) if deviation>0 else None
+    sharpe = statistics.mean(daily)/deviation*math.sqrt(annual_sessions) if deviation>0 else None
     peak, mdd = anchor, 0.
     for r in rows:
         peak = max(peak,r['nav'])
@@ -66,10 +66,12 @@ def evaluation_scope(case):
 def pareto_front(rows, return_key='net_return', loss_key='negative_months'):
     valid = [r for r in rows if isinstance(r.get(return_key),(int,float)) and math.isfinite(r[return_key])
              and isinstance(r.get(loss_key),(int,float)) and math.isfinite(r[loss_key])]
-    front = []
-    for p in valid:
-        dominated = any(q[return_key]>=p[return_key] and q[loss_key]<=p[loss_key]
-                        and (q[return_key]>p[return_key] or q[loss_key]<p[loss_key]) for q in valid)
-        if not dominated:
-            front.append(p)
-    return sorted(front,key=lambda r:(r[loss_key],r[return_key],r.get('id','')))
+    # Stored MDD is negative. Risk is its magnitude, with smaller being better.
+    risk=lambda r:abs(r[loss_key]) if loss_key=='mdd' else r[loss_key]
+    ordered=sorted(valid,key=lambda r:(risk(r),-r[return_key],r.get('id','')))
+    front=[];best=float('-inf');best_risk=None
+    for row in ordered:
+        value=row[return_key];cost=risk(row)
+        if value>best or (value==best and cost==best_risk):
+            front.append(row);best=value;best_risk=cost
+    return front

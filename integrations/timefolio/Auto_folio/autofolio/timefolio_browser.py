@@ -465,6 +465,10 @@ class TimefolioBrowser:
                 weight_pct = max(0.01, round(room, 2))
         self._choose_side(page, side)
         self._fill_weight(page, weight_pct)
+        if order.get('full_liquidation'):
+            if side != 'sell':
+                raise ValueError('전량 청산은 매도 주문만 지원합니다')
+            self._select_full_liquidation(page)
         self._choose_default_price_type(page, opp_tick=opp_tick)
         if not submit:
             return {
@@ -676,6 +680,14 @@ class TimefolioBrowser:
         label = "매수" if side == "buy" else "매도"
         if label not in text:
             raise RuntimeError(f"타임폴리오 {label} 버튼을 찾지 못했습니다.")
+
+    def _select_full_liquidation(self, page: Page) -> None:
+        # Displayed position weights are rounded. Weight-only exits can leave
+        # residual shares; the contest's explicit checkbox closes the position.
+        checkbox = page.locator('[role="dialog"]').last.locator('#exitAll')
+        checkbox.check(force=True, timeout=2500)
+        if not checkbox.is_checked():
+            raise RuntimeError('전량 청산 선택 확인 실패 — 제출 중단')
 
     def _fill_weight(self, page: Page, weight_pct: float) -> None:
         dialog = page.locator('[role="dialog"]').last

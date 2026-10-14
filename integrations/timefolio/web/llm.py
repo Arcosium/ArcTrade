@@ -59,6 +59,9 @@ def complete(prompt: str, *, provider: str | None = None, json_mode: bool = Fals
         payload["max_completion_tokens"] = max_tokens
     else:
         payload["max_tokens"] = max_tokens
+    if name == "local":
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload.update(temperature=0.3, top_p=0.8, top_k=20)
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     headers = {"Content-Type": "application/json"}

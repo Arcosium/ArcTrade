@@ -93,7 +93,7 @@ def order_payload(symbol,side,weight,summary,price,limits,adv=0,gross_exposure=1
     held=next((p for p in positions if p['ticker']==symbol),None)
     if side=='sell':
         if not held:return None
-        return dict(ticker=symbol,side=side,qty=int(held['qty']),weight_pct=float(held['weight_pct']),submit=True)
+        return dict(ticker=symbol,side=side,qty=int(held['qty']),weight_pct=max(.01,float(held['weight_pct'])),submit=True,full_liquidation=True)
     if held:return None
     cash=nav-sum(float(p['value_krw']) for p in positions)
     # Unknown current market caps: treat every holding as small-cap (30% total).

@@ -8,7 +8,7 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, HTMLResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from .config import ROOT, RUNS, ARC
@@ -49,7 +49,7 @@ async def lifespan(app):
     with contextlib.suppress(asyncio.CancelledError):
         await task
 
-app=FastAPI(title='QuantInSight',docs_url=None,redoc_url=None,lifespan=lifespan)
+app=FastAPI(title='ArcTrade',docs_url=None,redoc_url=None,lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
 app.include_router(auth_router)
 app.mount('/static',StaticFiles(directory=ROOT/'static'),name='static')
@@ -57,8 +57,12 @@ app.mount('/static',StaticFiles(directory=ROOT/'static'),name='static')
 
 @app.middleware('http')
 async def headers(request,call_next):
+    if request.url.hostname=='quantinsight.ai-ve.uk':
+        return HTMLResponse('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>QuantInSight</title></head><body></body></html>',
+                            status_code=200 if request.url.path=='/' else 404,
+                            headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
     if request.url.hostname=='autofolio.ai-ve.uk':
-        return RedirectResponse('https://quantinsight.ai-ve.uk'+request.url.path+('?' + request.url.query if request.url.query else ''),status_code=308)
+        return RedirectResponse('https://arctrade.ai-ve.uk'+request.url.path+('?' + request.url.query if request.url.query else ''),status_code=308)
     response=await call_next(request)
     response.headers['X-Content-Type-Options']='nosniff'
     response.headers['Referrer-Policy']='same-origin'
@@ -76,7 +80,7 @@ def index(identity=None):return FileResponse(ROOT/'static/index.html')
 
 
 @app.get('/api/leaderboard')
-def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",pattern="^(kr|us|crypto|timefolio)$"),known:str|None=Query(None,max_length=40)):
+def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",pattern="^(kr|us|crypto|timefolio)$"),known:str|None=Query(None,max_length=40),x_axis:str=Query('negative_months',pattern='^(negative_months|mdd)$'),y_axis:str=Query('net_return',pattern='^(net_return|sharpe)$')):
     from .evaluation import selection_metrics
     all_rows=[];learned_only=setting('labs_v2_enabled',False)
     for r in rows():
@@ -92,9 +96,11 @@ def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",patt
     cohorts=sorted(cohorts.values(),key=lambda c:(c['evaluation_window'][1],c['count'],c['sessions']),reverse=True)
     selected=cohort if cohort in {c['id'] for c in cohorts} else (cohorts[0]['id'] if cohorts else None)
     chosen=[r for r in all_rows if r['cohort']==selected]
-    front={r['id'] for r in pareto_front(chosen)}
+    # Explicitly validated axes; automatic selection keeps its fixed OS policy.
+    frontier=lambda values:pareto_front(values,return_key=y_axis,loss_key=x_axis)
+    front={r['id'] for r in frontier(chosen)}
     screened=[r for r in chosen if r.get('rule_screen_pass')]
-    valid_front={r['id'] for r in pareto_front(screened)}
+    valid_front={r['id'] for r in frontier(screened)}
     # The strategy page reads segment tables and contest checks from /api/strategy;
     # the genome stays so the board can tell same-named trials apart.
     points=[{k:v for k,v in r.items() if k not in ['cases','source_digest','limitations','performance','contest_validation']} |
@@ -105,8 +111,8 @@ def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",patt
     for point in points:point['applied_targets']=mapped['assignments'].get(point['id'],[])
     board=dict(cohort=selected,cohorts=cohorts,strategies=points,total=len(all_rows),
                 references=mapped['points'],
-                frontier=[r['id'] for r in pareto_front(chosen)],
-                screened_frontier=[r['id'] for r in pareto_front(screened)],
+                frontier=[r['id'] for r in frontier(chosen)],x_axis=x_axis,y_axis=y_axis,
+                screened_frontier=[r['id'] for r in frontier(screened)],
                 period_label=((' ~ '.join([chosen[0]['start'],chosen[0]['end']])+' · OS 9개월') if chosen else 'OS 9개월 · 첫 검증 대기'), comparison='OS 9개월',selection_scope='os',protocol=research.protocol(market))
     # The map polls every few seconds; an unchanged board is answered without its body.
     version=hashlib.sha256(json.dumps(board,sort_keys=True,default=str).encode()).hexdigest()[:20]
@@ -154,8 +160,8 @@ def detail(identity: str,request:Request,phase:int=Query(0,ge=0),months:int=Quer
     span=qualified_window(summary)
     selected=period_rows(case,months,span,scope)
     if not selected:raise HTTPException(409,'이 기간에 계좌 장부가 없습니다.')
-    split=performance(period_rows(case,months,span),*span)
-    metrics=segment_metrics(selected,*span,36) if scope=='all' else split[scope]
+    split=performance(period_rows(case,months,span),*span,market=summary.get('market','kr'))
+    metrics=segment_metrics(selected,*span,36,market=summary.get('market','kr')) if scope=='all' else split[scope]
     if not metrics:raise HTTPException(409,'선택 구간의 완전한 평가 기록이 없습니다.')
     trades=[t for t in case['trades'] if selected[0]['date']<=normalized_date(t.get('date',''))<=selected[-1]['date']]
     symbols=Counter(str(t.get('code','')) for t in trades)
@@ -226,3 +232,6 @@ from .briefing import router as briefing_router
 from .auto_apply import router as auto_apply_router
 app.include_router(briefing_router)
 app.include_router(auto_apply_router)
+
+from .public_routes import router as public_router
+app.include_router(public_router)

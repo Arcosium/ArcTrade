@@ -82,7 +82,7 @@ def test_discovery_uses_completion_events_and_user_scope(tmp_path, monkeypatch):
     for identity, owner, ret, sharpe, losses, stamp, accepted, engine in rows:
         payload = dict(id=identity,title=identity,owner_id=owner,market='crypto',net_return=ret,sharpe=sharpe,negative_months=losses,accepted=accepted,genome={'engine':engine})
         from autofolio.evaluation import PROTOCOL
-        payload.update(evaluation_protocol=PROTOCOL,performance={'os':dict(months=9,net_return=ret,negative_months=losses,mdd=-.1,sharpe=sharpe)})
+        payload.update(activity_validation={"version":"os_activity_v1","passed":True},evaluation_protocol=PROTOCOL,performance={'os':dict(months=9,net_return=ret,negative_months=losses,mdd=-.1,sharpe=sharpe)})
         db.execute('INSERT INTO strategies VALUES(?,?,?)', (identity,json.dumps(payload),identity))
         db.execute('INSERT INTO alpha_candidates VALUES(?,?,?,?)',(identity,owner,'done',identity))
         db.execute('INSERT INTO events VALUES(?,?,?)',('market_completed',stamp,json.dumps({'job':identity})))

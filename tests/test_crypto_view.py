@@ -38,12 +38,12 @@ def marks(tmp_path, monkeypatch):
 
 
 def upstream(mock, payload):
-    mock.return_value.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+    mock.side_effect = lambda *a, **kw: dict(payload) if payload else None
 
 
 def test_actual_fee_only_series_keeps_equity_units_and_variant_isolation(client, marks):
     before = marks.read_bytes()
-    with patch('autofolio.crypto_view.urllib.request.urlopen') as call:
+    with patch('integrations.crypto.app.book') as call:
         upstream(call, {'equity': 1.12, 'settled_return_pct': 12, 'series': []})
         event = client.get('/crypto/api/book/cnn?history_limit=10&history_offset=0').json()
         equal = client.get('/crypto/api/book/cnn_equal').json()
@@ -57,7 +57,7 @@ def test_actual_fee_only_series_keeps_equity_units_and_variant_isolation(client,
 def test_missing_database_is_not_created_or_filled(tmp_path, monkeypatch, client):
     missing = tmp_path / 'missing.sqlite3'
     monkeypatch.setenv('HYFE_PAPER_DB', str(missing))
-    with patch('autofolio.crypto_view.urllib.request.urlopen') as call:
+    with patch('integrations.crypto.app.book') as call:
         upstream(call, {'equity': 1.15, 'series': []})
         data = client.get('/crypto/api/book/cnn').json()
     assert data['series'] == [] and data['series_message']
@@ -66,7 +66,7 @@ def test_missing_database_is_not_created_or_filled(tmp_path, monkeypatch, client
 
 def test_legacy_books_preserve_existing_series(client):
     payload = {'equity': 0.97, 'series': [{'ts': 1, 'equity': 0.97}]}
-    with patch('autofolio.crypto_view.urllib.request.urlopen') as call, patch('autofolio.crypto_view.paper_series') as series:
+    with patch('integrations.crypto.app.book') as call, patch('autofolio.crypto_view.paper_series') as series:
         upstream(call, payload)
         assert client.get('/crypto/api/book/v2').json() == payload
         series.assert_not_called()
@@ -76,28 +76,28 @@ def test_legacy_books_preserve_existing_series(client):
     'log?limit=201', 'alarms?limit=0', 'candles/BTC?n=401', 'book/cnn?history_offset=-1',
     'book/cnn?history_limit=10&history_limit=20'])
 def test_endpoint_and_query_allowlist(client, path):
-    with patch('autofolio.crypto_view.urllib.request.urlopen') as call:
+    with patch('integrations.crypto.app.book') as call:
         assert client.get('/crypto/api/' + path).status_code in (404, 422)
         call.assert_not_called()
 
 
 def test_unicode_candles_fixed_origin(client):
-    with patch('autofolio.crypto_view.urllib.request.urlopen') as call:
+    with patch('integrations.crypto.app.candles') as call:
         upstream(call, {'candles': []})
         assert client.get('/crypto/api/candles/龙虾?tf=240&n=80').status_code == 200
-        assert call.call_args.args[0] == 'http://127.0.0.1:8996/api/candles/%E9%BE%99%E8%99%BE?tf=240&n=80'
+        call.assert_called_once_with('龙虾', tf=240, n=80)
 
 
 def test_auth_required_and_legacy_view_redirects(client):
     assert client.get('/crypto/view', follow_redirects=False).headers['location'] == '/?market=crypto&view=paper'
     assert client.get('/crypto/static/index.html').status_code == 404
     client.cookies.clear()
-    with patch('autofolio.crypto_view.urllib.request.urlopen') as call:
+    with patch('integrations.crypto.app.book') as call:
         assert client.get('/crypto/api/summary', follow_redirects=False).status_code in (401, 303)
         call.assert_not_called()
 
 
 def test_missing_upstream_book_is_unavailable(client):
-    with patch('autofolio.crypto_view.urllib.request.urlopen') as call:
+    with patch('integrations.crypto.app.book') as call:
         upstream(call, None)
         assert client.get('/crypto/api/book/cnn').status_code == 503

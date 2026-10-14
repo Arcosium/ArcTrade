@@ -76,21 +76,20 @@ def api(endpoint: str, request: Request):
             or candle.isalnum() and len(candle) <= 16):
         raise HTTPException(404)
     query = query_string(endpoint, request.query_params)
-    url = 'http://127.0.0.1:8996/api/' + quote(endpoint, safe='/')
-    if query:
-        url += '?' + query
+    # Embedded read-only adapter survives retirement of the standalone website.
+    from integrations.crypto import app as source
+    from urllib.parse import parse_qs
+    args = {k:int(v[0]) for k,v in parse_qs(query).items()}
     try:
-        with urllib.request.urlopen(url, timeout=20) as response:
-            raw = response.read(8_000_001)
-        if len(raw) > 8_000_000:
-            raise ValueError('response too large')
-        payload = json.loads(raw)
-        if not isinstance(payload, dict):
-            raise ValueError('missing operational data')
-        if endpoint.startswith('book/') and not isinstance(payload.get('equity'), (int, float)):
-            raise ValueError('missing paper book')
-    except (OSError, urllib.error.URLError, ValueError):
-        raise HTTPException(503, '크립토 모의매매 서비스에 연결하지 못했습니다.')
+        if endpoint == 'summary': payload = source.summary()
+        elif endpoint == 'alarms': payload = source.alarms(**args)
+        elif endpoint == 'log': payload = source.log(**args)
+        elif endpoint.startswith('book/'): payload = source.book(endpoint.split('/')[1], **args)
+        else: payload = source.candles(candle, **args)
+        if not isinstance(payload,dict) or endpoint.startswith('book/') and not isinstance(payload.get('equity'),(int,float)):
+            raise ValueError('Missing paper book')
+    except (OSError, ValueError, sqlite3.Error):
+        raise HTTPException(503, '크립토 모의매매 자료를 불러오지 못했습니다.')
     if endpoint in {'book/cnn', 'book/cnn_equal'}:
         payload['series'], payload['series_message'] = paper_series(endpoint.split('/')[1])
         payload['series_basis'] = SERIES_BASIS

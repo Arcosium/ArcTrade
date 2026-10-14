@@ -1,3 +1,23 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>로그인 · QuantInSight</title><link rel="stylesheet" href="/static/login.css?v=20261011-webp"></head>
-<body><main><section class="identity"><a href="/login" class="brand">QuantInSight</a><h1>시장을 읽고,<br>전략을 검증하다.</h1></section><section class="access" aria-label="로그인"><div class="switch" role="group" aria-label="계정"><button id="login-mode" class="active" type="button" aria-pressed="true">로그인</button><button id="register-mode" type="button" aria-pressed="false">회원가입</button></div><form id="auth-form"><label for="username">아이디</label><input id="username" name="username" autocomplete="username" minlength="3" maxlength="40" pattern="[A-Za-z0-9_\-]+" required><label for="password">비밀번호</label><input id="password" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="200" required><p id="hint"></p><details id="connections" hidden><summary>계좌 연결 (선택)</summary><fieldset id="connection-fields" disabled><legend>한국투자증권 실매매 · 정지</legend><label for="kis-key">App Key</label><input id="kis-key" type="password" autocomplete="off" maxlength="1000"><label for="kis-secret">App Secret</label><input id="kis-secret" type="password" autocomplete="off" maxlength="2000"><div class="account-number"><div><label for="kis-account">계좌번호 (8자리)</label><input id="kis-account" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="off"></div><div><label for="kis-product">상품코드 (2자리)</label><input id="kis-product" inputmode="numeric" pattern="[0-9]{2}" maxlength="2" placeholder="01" autocomplete="off"></div></div><h2>타임폴리오</h2><label for="timefolio-user">타임폴리오 아이디</label><input id="timefolio-user" autocomplete="off" maxlength="100"><label for="timefolio-password">타임폴리오 비밀번호</label><input id="timefolio-password" type="password" autocomplete="off" maxlength="200"></fieldset></details><button class="submit" id="submit" type="submit">로그인</button><p id="message" role="status" aria-live="polite"></p></form></section></main><script src="/static/login.js?v=20261011-quiet" defer></script></body></html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><meta name="description" content="ArcTrade 관리자 연구소 로그인">
+<title>관리자 로그인 · ArcTrade</title><link rel="stylesheet" href="/static/login.css?v=20261014-arctrade">
+</head>
+<body>
+<header><a href="/" class="brand">ArcTrade</a><a href="/">페이퍼 성과 보기</a></header>
+<main>
+<section class="access" aria-labelledby="login-title">
+<h1 id="login-title">연구소 관리자 로그인</h1>
+<p class="intro">페이퍼매매 성과는 로그인 없이 볼 수 있습니다.</p>
+<form id="auth-form">
+<label for="username">관리자 아이디</label><input id="username" name="username" autocomplete="username" minlength="3" maxlength="40" pattern="[A-Za-z0-9_\-]+" required>
+<label for="password">비밀번호</label><input id="password" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="200" required>
+<button class="submit" id="submit" type="submit">연구소 로그인</button>
+<p id="message" role="status" aria-live="polite"></p>
+</form>
+</section>
+</main>
+<script src="/static/login.js?v=20261014-arctrade" defer></script>
+</body></html>

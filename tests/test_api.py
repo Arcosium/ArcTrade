@@ -19,7 +19,7 @@ def split_summary(identity,span,os_return,whole_return=99,ros_return=99):
                 cohort='cohort-'+span[1],evaluation_window=list(span),months=36,
                 start=days[0],end=days[-1],sessions=len(days),phase_count=1,
                 net_return=whole_return,negative_months=0,mdd=0,evaluation_protocol=PROTOCOL,
-                genome={'engine':'learned_v1'},cases=[],
+                genome={'engine':'learned_v1'},cases=[],activity_validation={'version':'os_activity_v1','passed':True},
                 performance={'os':dict(net_return=os_return,negative_months=1,mdd=-.1,sharpe=1,
                               months=9,start=os['start'],end=os['end'],sessions=len(expected_dates('crypto',os['start'],os['end']))),
                              'ros':dict(net_return=ros_return)})
@@ -93,7 +93,7 @@ class SiteTests(unittest.TestCase):
         cache=lambda path:self.client.get(path).headers['Cache-Control']
         self.assertEqual(cache('/'),'no-store')
         self.assertEqual(cache('/api/auth/me'),'no-store')
-        self.assertEqual(cache('/static/app.js?v=1'),'private, max-age=31536000, immutable')
+        self.assertEqual(cache('/static/app.js?v=1'),'public, max-age=31536000, immutable')
         self.assertEqual(cache('/static/login.css?v=1'),'public, max-age=31536000, immutable')
         self.assertEqual(cache('/static/app.js'),'no-cache')
         self.assertEqual(cache('/static/missing.js?v=1'),'no-store')

@@ -1,9 +1,9 @@
 [Unit]
-Description=Autofolio read-only alpha research leaderboard
+Description=ArcTrade public paper performance and admin research
 After=network.target
 
 [Service]
-WorkingDirectory=/home/arcosium/projects/QuantInSight
+WorkingDirectory=/home/arcosium/projects/ArcTrade
 ExecStart=/usr/bin/python3 -m uvicorn autofolio.app:app --host 127.0.0.1 --port 8997
 Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 Restart=on-failure

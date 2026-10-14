@@ -1,8 +1,21 @@
 'use strict';
-let mode='login';
-const byId=id=>document.getElementById(id);
-function setMode(next){mode=next;for(const kind of ['login','register']){byId(kind+'-mode').classList.toggle('active',kind===mode);byId(kind+'-mode').setAttribute('aria-pressed',String(kind===mode));}byId('submit').textContent=mode==='login'?'로그인':'회원가입';byId('password').autocomplete=['current-password','new-password'][mode==='login'?0:1];byId('hint').textContent=mode==='login'?'':'아이디 3자 이상 · 비밀번호 10자 이상';byId('message').textContent='';byId('connections').hidden=mode!=='register';byId('connection-fields').disabled=mode!=='register';}
-byId('login-mode').onclick=()=>setMode('login');byId('register-mode').onclick=()=>setMode('register');
-byId('auth-form').onsubmit=async event=>{event.preventDefault();byId('submit').disabled=true;byId('message').textContent='';try{const payload={username:byId('username').value.trim(),password:byId('password').value};if(mode==='register'){payload.kis={app_key:byId('kis-key').value.trim(),app_secret:byId('kis-secret').value.trim(),account_no:byId('kis-account').value.trim(),account_product:byId('kis-product').value.trim(),mode:'live'};payload.timefolio={username:byId('timefolio-user').value.trim(),password:byId('timefolio-password').value};}const response=await fetch('/api/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'QuantInSight'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'입력 항목의 형식과 길이를 확인해 주세요.');if(mode==='register'){setMode('login');for(const input of byId('connection-fields').querySelectorAll('input'))input.value='';byId('connections').open=false;byId('message').textContent='가입했습니다. 로그인해 주세요.';byId('password').value='';byId('password').focus();}else location.assign('/');}catch(error){byId('message').textContent=error.message||'연결을 확인해 주세요.';}finally{byId('submit').disabled=false;}};
-
-if(new URLSearchParams(location.search).get('mode')==='register')setMode('register');
+const byId = id => document.getElementById(id);
+byId('auth-form').onsubmit = async event => {
+  event.preventDefault();
+  byId('submit').disabled = true;
+  byId('message').textContent = '';
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Requested-With': 'ArcTrade'},
+      body: JSON.stringify({username: byId('username').value.trim(), password: byId('password').value})
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : '아이디와 비밀번호 형식을 확인해 주세요.');
+    location.assign('/?view=research');
+  } catch (error) {
+    byId('message').textContent = error.message || '연결을 확인해 주세요.';
+  } finally {
+    byId('submit').disabled = false;
+  }
+};

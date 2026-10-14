@@ -1,0 +1,17 @@
+[Unit]
+Description=ArcTrade minute paper NAV observations (no orders)
+After=network.target
+
+[Service]
+WorkingDirectory=/home/arcosium/projects/ArcTrade
+ExecStart=/usr/bin/python3 -m autofolio.observations
+Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+Restart=on-failure
+RestartSec=15
+CPUQuota=100%
+MemoryMax=1G
+Nice=15
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

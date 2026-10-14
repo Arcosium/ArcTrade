@@ -16,11 +16,17 @@ def initialize():
 
 def request_retrain(uid,strategy,target,auto_policy=None):
     if target not in ('kr-paper','us-paper','crypto-paper','timefolio'):raise ValueError('정지된 실매매에는 적용할 수 없습니다.')
+    from .store import setting
+    if target=='kr-paper' and setting('kr_minute_paper_enabled',False):
+        raise ValueError('국장은 분봉 모델로 운용 중입니다. 일봉 연구 전략은 분봉 검증 없이 적용할 수 없습니다.')
     initialize()
     from .auto_apply import initialize as auto_initialize
     auto_initialize()
-    with connect() as db:row=db.execute('SELECT source FROM strategies WHERE id=?',(strategy,)).fetchone()
+    with connect() as db:row=db.execute('SELECT source,payload FROM strategies WHERE id=?',(strategy,)).fetchone()
     if not row:raise ValueError('전략 결과 없음')
+    from .evaluation import selection_metrics
+    if selection_metrics(json.loads(row['payload'])) is None:
+        raise ValueError('OS 거래 표본·활동 기간 검증을 통과한 전략만 적용할 수 있습니다.')
     source=Path(row['source'])
     try:report=json.loads(source.read_text())
     except (OSError,ValueError):raise ValueError('원본 학습 결과를 읽을 수 없습니다.')
@@ -42,7 +48,8 @@ def request_retrain(uid,strategy,target,auto_policy=None):
             return pending['id']
         db.execute("INSERT INTO model_deployments VALUES(?,?,?,?,?,'queued',?,?,NULL,'동일 조건 재학습 대기') ON CONFLICT(id) DO UPDATE SET status='queued',updated=excluded.updated,message=excluded.message",(identity,uid,target,strategy,str(source),now,now))
         if not auto_policy:
-            db.execute("INSERT INTO strategy_assignments VALUES(?,?,?,?,'retraining') ON CONFLICT(user_id,target) DO UPDATE SET strategy_id=excluded.strategy_id,updated=excluded.updated,status='retraining'",(uid,target,strategy,now))
+            # Keep the active book running until replacement passes retraining.
+            db.execute("INSERT INTO strategy_assignments VALUES(?,?,?,?,'retraining') ON CONFLICT(user_id,target) DO NOTHING",(uid,target,strategy,now))
         if auto_policy:
             db.execute('INSERT OR REPLACE INTO auto_apply_jobs VALUES(?,?,?,?)',(identity,uid,*auto_policy))
         else:

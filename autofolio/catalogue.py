@@ -13,7 +13,7 @@ from .config import REPORT_ROOTS
 from .metrics import evaluation_scope, ledger, normalized_date, statistics_for
 from .store import connect, event, setting, set_setting
 
-INDEX_VERSION=12
+INDEX_VERSION=13
 
 
 def sha(path):
@@ -108,15 +108,20 @@ def proof_status(path):
 
 
 def ingest_file(path,stat):
+    def reject(status):
+        # A truncated/replaced result must not leave its previous valid score live.
+        with connect() as db:
+            db.execute('DELETE FROM strategies WHERE source=?',(str(path.resolve()),))
+        return status,0
     try:report=json.loads(path.read_text())
-    except (ValueError,OSError):return 'incomplete',0
+    except (ValueError,OSError):return reject('incomplete')
     nodes=list(book_nodes(report))
-    if not nodes:return 'no_book',0
+    if not nodes:return reject('no_book')
     from .period import window, using_window, require_complete, accepts
     from .evaluation import performance, segment_metrics, valid_window, PROTOCOL
     span=report.get("evaluation_window") or [report.get("recipe",{}).get("evaluation_start"),report.get("recipe",{}).get("evaluation_end")]
     if not all(span):span=window()
-    if not valid_window(span):return "unmatched",0
+    if not valid_window(span):return reject('unmatched')
     groups={}
     for pointer,case in nodes:
         codes=[str(t.get('code',t.get('ticker',''))) for t in case['trades'][:20]]
@@ -124,13 +129,15 @@ def ingest_file(path,stat):
         try:
             _,_,recorded=evaluation_scope(case)
             rows=ledger(case,*span)
-            metrics=segment_metrics(rows,*span,36)
+            metrics=segment_metrics(rows,*span,36,market=report.get('market','timefolio'))
             if metrics is None:continue
             metrics['market']=report.get('market','timefolio')
             with using_window(*span):
                 require_complete([r['date'] for r in rows],metrics['market'])
                 if not accepts(metrics):continue
-            split=performance(rows,*span)
+            split=performance(rows,*span,market=metrics['market'])
+            from .validation import assess, aggregate
+            activity=assess(case,*span)
             if recorded and isinstance(recorded.get('pooled'),dict):
                 stored=recorded['pooled'].get('net_return')
                 if isinstance(stored,(int,float)) and abs(stored-metrics['net_return'])>1e-6:
@@ -144,7 +151,7 @@ def ingest_file(path,stat):
                 if isinstance(account_metrics,dict) and isinstance(account_metrics.get('four_week_turnover_stop'),bool):
                     turnover_pass=not account_metrics['four_week_turnover_stop']
             groups.setdefault((key,cohort),[]).append(dict(pointer=list(pointer),phase=case.get('phase',case.get('offset_sessions',len(groups))),
-                metrics=metrics,performance=split,trade_count=sum(metrics['start']<=normalized_date(t.get('date',''))<=metrics['end'] for t in case['trades']),
+                metrics=metrics,performance=split,activity_validation=activity,trade_count=sum(metrics['start']<=normalized_date(t.get('date',''))<=metrics['end'] for t in case['trades']),
                 turnover_pass=turnover_pass,warm_start=normalized_date(case['daily'][0]['date'])))
         except (ValueError,TypeError,KeyError,ZeroDivisionError):continue
     count=0
@@ -155,6 +162,7 @@ def ingest_file(path,stat):
     source_digest=sha(path)
     verified=proof_status(path)
     with connect() as db:
+        db.execute('DELETE FROM strategies WHERE source=?',(str(path.resolve()),))
         for (key,cohort),cases in groups.items():
             identity=hashlib.sha256((str(path.resolve())+'\0'+key+'\0'+cohort).encode()).hexdigest()[:20]
             means={k:statistics.mean(c['metrics'][k] for c in cases) for k in ['net_return','negative_months','mdd','mean_loss_month','worst_month']}
@@ -180,6 +188,7 @@ def ingest_file(path,stat):
                 competition_compliance_verified=bool(contest_validation and contest_validation['competition_compliance_verified']),
                 contest_validation=contest_validation,
                 evaluation_protocol=PROTOCOL,evaluation_window=list(span),performance=splits,
+                activity_validation=aggregate([c['activity_validation'] for c in cases]),
                 selection_scope='os',training_summary=report.get('training_summary'),
                 protocol_origin='native' if report.get('evaluation_protocol')==PROTOCOL else 'retrospective',
                 cases=cases,source_digest=source_digest,source_name=path.parent.name+'/'+path.name,

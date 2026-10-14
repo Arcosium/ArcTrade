@@ -19,8 +19,8 @@ _LOCK = threading.Lock()
 from config import LOCAL_LLM_MODEL as _LOCAL, LOCAL_LLM_MODEL_THINKING as _LOCAL_T
 
 MODEL_CHOICES = (
-    {"id": _LOCAL_T, "label": "로컬 Qwen3.6 35B · thinking ON (결정용)"},
-    {"id": _LOCAL,   "label": "로컬 Qwen3.6 35B · thinking OFF (분석·도구)"},
+    {"id": _LOCAL_T, "label": "로컬 Qwen3.8 27B · thinking ON (결정용)"},
+    {"id": _LOCAL,   "label": "로컬 Qwen3.8 27B · thinking OFF (분석·도구)"},
 )
 _ALLOWED_MODELS = frozenset(c["id"] for c in MODEL_CHOICES)
 
@@ -44,6 +44,10 @@ def _read() -> Dict[str, Any]:
 def get_model_override(model_key: str) -> str:
     """해당 역할의 로컬 모델 오버라이드. 과거 외부 모델 값은 무시한다."""
     value = str((_read().get("model_overrides") or {}).get(model_key) or "").strip()
+    # Preserve saved thinking choices when retiring old model aliases.
+    legacy = value.removesuffix("+thinking")
+    if legacy.lower().startswith("qwen3.6"):
+        value = _LOCAL_T if value.endswith("+thinking") else _LOCAL
     return value if value in _ALLOWED_MODELS else ""
 
 

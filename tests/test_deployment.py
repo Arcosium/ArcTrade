@@ -8,7 +8,7 @@ def db(tmp_path,monkeypatch):
     monkeypatch.setattr(store,'DATA',tmp_path);monkeypatch.setattr(store,'DB',tmp_path/'state.sqlite')
     store.initialize();research.initialize();deployment.initialize()
     source=tmp_path/'review.json';source.write_text(json.dumps(dict(recipe=dict(recipe_id='sealed'))))
-    with store.connect() as con:con.execute('INSERT INTO strategies VALUES(?,?,?,?,?,?,?)',('s','title','model','cohort','{}',str(source),1))
+    with store.connect() as con:con.execute('INSERT INTO strategies VALUES(?,?,?,?,?,?,?)',('s','title','model','cohort',json.dumps({'activity_validation':{'version':'os_activity_v1','passed':True},'evaluation_protocol':'24is_9os_3ros_v1','performance':{'os':{'months':9,'net_return':.1,'negative_months':2,'mdd':-.1,'sharpe':1.}}}),str(source),1))
     return source
 
 
@@ -29,6 +29,21 @@ def test_durable_retraining_queue_deduplicates_and_separates_users(db):
 def test_missing_recipe_cannot_be_applied(db):
     db.write_text('{}')
     with pytest.raises(ValueError):deployment.request_retrain(1,'s','us-paper')
+
+
+def test_manual_retraining_keeps_active_assignment_until_verified(db):
+    with store.connect() as con:
+        con.execute("INSERT INTO strategy_assignments VALUES(1,'kr-paper','active-model',1,'paper_ready')")
+    deployment.request_retrain(1,'s','kr-paper')
+    with store.connect() as con:
+        row=con.execute("SELECT strategy_id,status FROM strategy_assignments WHERE user_id=1").fetchone()
+    assert tuple(row)==('active-model','paper_ready')
+
+
+def test_unvalidated_sparse_strategy_cannot_queue_manual_retraining(db):
+    with store.connect() as con:con.execute("UPDATE strategies SET payload='{}'")
+    with pytest.raises(ValueError,match='거래 표본'):
+        deployment.request_retrain(1,'s','kr-paper')
 
 
 def test_timefolio_retraining_separate_from_historical_certification(db,monkeypatch):

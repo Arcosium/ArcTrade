@@ -1,9 +1,9 @@
 [Unit]
-Description=Autofolio local genomic alpha search
+Description=ArcTrade continuous strategy research
 After=network.target
 
 [Service]
-WorkingDirectory=/home/arcosium/projects/QuantInSight
+WorkingDirectory=/home/arcosium/projects/ArcTrade
 ExecStart=/usr/bin/python3 -m autofolio.worker
 Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=
 CPUQuota=400%

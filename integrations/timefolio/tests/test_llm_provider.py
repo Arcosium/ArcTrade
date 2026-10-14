@@ -34,3 +34,5 @@ def test_local_system_prefix_precedes_changing_input(monkeypatch):
     for text in ('전략 A','전략 B'):llm.complete(text,provider='local',system='고정된 규칙표',json_mode=True)
     assert sent[0]['messages'][0]==sent[1]['messages'][0]=={'role':'system','content':'고정된 규칙표'}
     assert sent[0]['messages'][-1]!=sent[1]['messages'][-1]
+    assert sent[0]['chat_template_kwargs']=={'enable_thinking':False}
+    assert sent[0]['max_tokens']==8000

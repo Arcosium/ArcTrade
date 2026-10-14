@@ -22,7 +22,7 @@ _THINK_SUFFIX = "+thinking"
 
 # 로컬 OpenAI 호환 서버가 재기동 중이거나 일시적으로 바쁠 수 있으므로 백오프 재시도한다.
 # 400/401/402/422 같은 영구 오류는 재시도하지 않고 즉시 실패한다.
-_RETRYABLE_STATUS = (429, 500, 503)
+_RETRYABLE_STATUS = (429, 500, 502, 503, 504)
 _MAX_ATTEMPTS = 3
 # 사장 지시 2026-07-22 상향 (900→1800 / 1800→3600).
 # 이 두 값은 config.AGENT_MAX_TOKENS 의 pro 티어 예산과 **짝을 이뤄야 한다** — 예산이 타임아웃보다
@@ -77,11 +77,11 @@ def build_request(
     real_model, suffix_thinking = split_thinking(model)
     reasoning_on = bool(thinking) if thinking is not None else suffix_thinking
     payload["model"] = real_model
-    # llama.cpp accepts chat_template_kwargs; reasoning is also understood by
-    # several OpenAI-compatible servers. Sending both preserves the existing
-    # thinking/non-thinking agent split without an external provider.
+    # SGLang controls reasoning through the chat template. Keep the role split.
     payload["chat_template_kwargs"] = {"enable_thinking": reasoning_on}
-    payload["reasoning"] = {"enabled": reasoning_on}
+    payload["top_p"] = 0.95 if reasoning_on else 0.8
+    payload["top_k"] = 20
+
     url = f"{LOCAL_LLM_BASE_URL}/chat/completions"
     if response_format:
         payload["response_format"] = response_format
@@ -109,8 +109,13 @@ async def _post_with_retry(url: str, headers: Dict[str, str],
                 if is_local
                 else int(timeout_sec)
             )
-            timeout = aiohttp.ClientTimeout(total=effective_timeout_sec)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            if is_local:
+                remaining = grace_deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise LocalLLMError(f"로컬 LLM 재시도 시간 초과: {last_err}")
+                effective_timeout_sec = min(effective_timeout_sec, remaining)
+            timeout = aiohttp.ClientTimeout(total=effective_timeout_sec, connect=10)
+            async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
                 async with session.post(url, json=payload, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()

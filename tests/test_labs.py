@@ -57,9 +57,10 @@ def test_control_is_persistent_per_market_and_admin_only(db,monkeypatch):
     assert not labs.enabled('crypto') and labs.enabled('kr')
     assert client.post('/api/research/crypto/control',headers=headers,json={'enabled':True}).status_code==200
     assert labs.enabled('crypto')
-    client.post('/api/auth/register',headers=headers,json={'username':'member','password':password})
+    client.cookies.clear()
+    assert client.post('/api/auth/register',headers=headers,json={'username':'member','password':password}).status_code==410
     client.post('/api/auth/login',headers=headers,json={'username':'member','password':password})
-    assert client.post('/api/research/crypto/control',headers=headers,json={'enabled':False}).status_code==403
+    assert client.post('/api/research/crypto/control',headers=headers,json={'enabled':False}).status_code==401
     assert labs.enabled('crypto')
 
 

@@ -118,6 +118,32 @@ def prepare(market):
         return _prepare(market)
 
 
+def sealed_evidence(market):
+    """Recover past identity evidence from an intact, previously audited panel.
+
+    This retains the same provisional carry-forward policy as the academic
+    source. It does not certify new listings or relax the coverage gate.
+    """
+    import pyarrow.parquet as pq
+    import pandas as pd
+    end = pd.Timestamp(window()[1])
+    for audit in sorted((RUNS/'research_inputs').glob(f'20*/{market}.audit.json'), reverse=True):
+        info = json.loads(audit.read_text())
+        snapshot = audit.with_name(f'{market}.parquet')
+        if not (info.get('ready') and info.get('version') == VERSION
+                and info.get('market') == market and snapshot.exists()
+                and info.get('end') and pd.Timestamp(info['end']) <= end):
+            continue
+        if not info.get('snapshot_hash') or hashlib.sha256(snapshot.read_bytes()).hexdigest() != info['snapshot_hash']:
+            raise ValueError('sealed_evidence_hash_mismatch')
+        columns = ['date','symbol',*OHLC,'volume','tradable_buy','tradable_sell','sector','eligible']
+        frame = pq.ParquetFile(snapshot).read(columns=columns, use_threads=False).to_pandas()
+        if frame.empty or frame.date.max() > end or frame.date.max() > pd.Timestamp(info['end']):
+            raise ValueError('sealed_evidence_date_mismatch')
+        return frame, snapshot
+    raise FileNotFoundError('원본 검증 자료와 해시가 확인된 과거 연구 입력이 모두 없습니다.')
+
+
 def _prepare(market):
     import numpy as np
     import pandas as pd
@@ -136,14 +162,20 @@ def _prepare(market):
               'equity_scope_category','additional_equity_audit_pending']
     extra = ['known_reference_date','common_stock_control_eligible','sector'] if market == 'us' else ['native_volume_unit_verified']
     # ParquetFile avoids dataset scanner background-thread lifetime failures.
-    academic = pq.ParquetFile(SOURCES[market]).read(columns=common+extra, use_threads=False).to_pandas()
+    evidence_source = SOURCES[market]
+    recovered = not evidence_source.exists()
+    if recovered:
+        academic, evidence_source = sealed_evidence(market)
+    else:
+        academic = pq.ParquetFile(evidence_source).read(columns=common+extra, use_threads=False).to_pandas()
     academic['symbol'] = academic.symbol.astype(str)
     academic = academic[academic.symbol.isin([s+'@0' if market == 'us' else s for s in symbols])].copy()
     academic['date'] = pd.to_datetime(academic.date)
-    academic['eligible'] = ~academic.additional_equity_audit_pending.fillna(True).astype(bool)
-    if market == 'kr':
+    if not recovered:
+        academic['eligible'] = ~academic.additional_equity_audit_pending.fillna(True).astype(bool)
+    if not recovered and market == 'kr':
         academic['eligible'] &= academic.equity_scope_category.isin(['real_equity_candidate','dated_native_listed_KONEX_equity_candidate'])
-    else:
+    elif not recovered:
         known = pd.to_datetime(academic.known_reference_date, errors='coerce')
         academic['eligible'] &= academic.equity_scope_category.eq('common_equity_candidate') & academic.common_stock_control_eligible.fillna(False).astype(bool) & known.notna() & (known <= academic.date)
     if 'sector' not in academic:
@@ -183,7 +215,8 @@ def _prepare(market):
                 start=str(out.date.min().date()) if len(out) else None,
                 end=str(out.date.max().date()) if len(out) else None,
                 symbols=int(out.symbol.nunique()), dropped_symbols=dropped, bridges=bridges,
-                source_files=[fingerprint(SOURCES[market])]+[fingerprint(f) for f in files],
+                source_files=[fingerprint(evidence_source)]+[fingerprint(f) for f in files],
+                identity_evidence=('hash_verified_sealed_panel' if recovered else 'academic_audit'),
                 price_volume_basis=('NAVER daily chart OHLCV provider basis; volume units not independently exchange-audited. Academic native-volume flags apply to the older source and do not certify these NAVER rows.' if market == 'kr' else 'Single-provider adjusted OHLCV history where extended; strict constant-basis bridge otherwise.'),
                 limitations=['Current collector universe is survivorship-biased developmental universe, not a full PIT universe.',
                              'Eligibility uses only dated past academic identity; rows after academic end carry provisional identity.',

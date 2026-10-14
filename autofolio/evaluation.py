@@ -23,10 +23,10 @@ def periods(start=None,end=None):
             'ros':dict(start=ros_start.strftime('%Y%m%d'),end=end,months=3)}
 
 
-def segment_metrics(rows,start,end,months):
+def segment_metrics(rows,start,end,months,market='kr'):
     selected=[r for r in rows if start<=r['date']<=end]
     if not selected:return None
-    result=statistics_for(selected)
+    result=statistics_for(selected,annual_sessions=365 if market=='crypto' else 252)
     finish=datetime.strptime(end,'%Y%m%d').date()+timedelta(days=1)
     boundaries=[shift_months(finish,-i).strftime('%Y%m%d') for i in range(months,-1,-1)]
     monthly=[]
@@ -41,15 +41,17 @@ def segment_metrics(rows,start,end,months):
     return result
 
 
-def performance(rows,start=None,end=None):
-    return {name:segment_metrics(rows,**span) for name,span in periods(start,end).items()}
+def performance(rows,start=None,end=None,market='kr'):
+    return {name:segment_metrics(rows,**span,market=market) for name,span in periods(start,end).items()}
 
 
 def selection_metrics(summary):
+    from .validation import eligible
+    if not eligible(summary):return None
     if summary.get('evaluation_protocol')!=PROTOCOL:return None
     metric=(summary.get('performance') or {}).get('os')
     if not isinstance(metric,dict) or metric.get('months')!=9:return None
-    if not all(isinstance(metric.get(k),(int,float)) and math.isfinite(metric[k]) for k in ('net_return','negative_months','mdd')):return None
+    if not all(isinstance(metric.get(k),(int,float)) and not isinstance(metric[k],bool) and math.isfinite(metric[k]) for k in ('net_return','negative_months','mdd','sharpe')):return None
     return metric
 
 

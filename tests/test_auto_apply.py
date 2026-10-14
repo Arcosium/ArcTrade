@@ -19,7 +19,7 @@ def setup(tmp_path, monkeypatch):
         payload=dict(id=identity,title=identity,owner_id=owner,market=market,months=months,
                      net_return=ret,negative_months=loss,cohort='same',genome={'engine':'learned_v1'})
         from autofolio.evaluation import PROTOCOL
-        payload.update(evaluation_protocol=PROTOCOL,performance={'os':dict(months=9,net_return=ret,negative_months=loss,mdd=-.1)})
+        payload.update(activity_validation={"version":"os_activity_v1","passed":True},evaluation_protocol=PROTOCOL,performance={'os':dict(months=9,net_return=ret,negative_months=loss,mdd=-.1,sharpe=1.)})
         source=tmp_path/(identity+'.json');source.write_text(json.dumps({'recipe':{'recipe_id':identity}}))
         with store.connect() as db:
             db.execute('INSERT INTO strategies VALUES(?,?,?,?,?,?,?)',(identity,identity,'ridge','same',json.dumps(payload),str(source),1))

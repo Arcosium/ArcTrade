@@ -61,12 +61,16 @@ def state(uid, market):
         policy = db.execute('SELECT * FROM auto_apply_policies WHERE user_id=? AND market=?', (uid, market)).fetchone()
     from .auth import get_connection
     available = market != 'timefolio' or bool(get_connection(uid,'timefolio'))
+    minute = market=='kr' and store.setting('kr_minute_paper_enabled',False)
+    if minute:available=False
     message = (f'{LABELS.get(market)} · 켠 이후의 새 OS 9개월 파레토 후보 중 수익률 최대, 동률이면 손실월 최소 · 재학습 검증 후 전환'
                if available else '타임폴리오 계정을 먼저 연결해 주세요.')
     if market=='timefolio' and available:
         message+=' · 과거 대회 적합성 인증과 별개로 실제 주문마다 13회 규칙 확인'
     if market == 'kr':
         message += ' · 한투 실매매 정지 유지'
+    if minute:
+        message='별도 분봉 모델 전진 검증 중 · 일봉 연구 후보의 자동 적용은 분봉 검증 후 가능합니다.'
     return dict(enabled=bool(policy and policy['enabled']), available=available, target=TARGETS[market],
                 message=message, last_action=policy['message'] if policy else '', updated=policy['updated'] if policy else None)
 
@@ -133,10 +137,11 @@ def tick():
         if not policies:
             return
         with auth_connect() as db:
-            people = {r['id']: dict(r) for r in db.execute('SELECT id,role FROM users')}
+            people = {r['id']: dict(r) for r in db.execute("SELECT id,role FROM users WHERE role='admin'")}
         all_rows = rows()
         for policy in policies:
             uid, market = policy['user_id'], policy['market']
+            if market=='kr' and store.setting('kr_minute_paper_enabled',False):continue
             if uid not in people or market not in LABELS:
                 continue
             candidates = eligible(people[uid], market, all_rows)

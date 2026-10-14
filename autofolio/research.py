@@ -273,7 +273,7 @@ def tick(capacity):
             identity=pending['id']
             with connect() as db:db.execute("UPDATE model_deployments SET status='training',message='동일 조건 모델 재학습 중' WHERE id=?",(identity,))
             _DEPLOYMENTS[identity]=spawn(['autofolio.deployment',identity],RUNS/'deployments'/f'{identity}.log');available-=1
-    if available and not _PAPER and time.time()-_PAPER_AT>300:
+    if not setting('independent_paper_service',False) and available and not _PAPER and time.time()-_PAPER_AT>300:
         _PAPER_AT=time.time()
         with connect() as db:ready=db.execute("SELECT 1 FROM model_deployments WHERE status='ready' AND target IN ('kr-paper','us-paper','crypto-paper','timefolio') LIMIT 1").fetchone()
         if ready:

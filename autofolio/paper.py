@@ -27,6 +27,9 @@ def snapshot(uid,market):
 
 
 def advance(dep):
+    from .store import setting
+    if dep['target']=='kr-paper' and setting('kr_minute_paper_enabled',False):
+        return  # Independent minute runner owns the same account and lock.
     import fcntl
     from .config import DATA
     DATA.mkdir(parents=True,exist_ok=True)

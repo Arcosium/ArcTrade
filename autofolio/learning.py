@@ -265,13 +265,13 @@ def _evaluate(candidate,destination):
     p,names=features(prices,g,market,auxiliary[0]['path'] if auxiliary else None);start,end=window()
     signals,proofs=walk_forward(p,names,g,start,end)
     case,stale=account(p,signals,g,market,start,end);require_complete([r['date'] for r in case['daily']],market)
-    books=ledger(case,start,end);metrics=segment_metrics(books,start,end,36)
+    books=ledger(case,start,end);metrics=segment_metrics(books,start,end,36,market=market)
     recipe=model_recipe.seal(dict(version=2,market=market,definition=g,fields=names,input=inputs,auxiliary_inputs=auxiliary,libraries=model_recipe.environment(neural=g['model'] in NEURAL_MODELS),code=code,
       evaluation_start=start,evaluation_end=end,evaluation_protocol=PROTOCOL,selection_scope='os',folds=proofs,
       deploy_as_of=str((pd.Timestamp(end)+pd.Timedelta(days=1)).date()),weights_retained=False,
       execution=dict(signal='session close',fill='next session open',long_only=True,config={k:g[k] for k in ('buy_rule','sell_rule','position_sizing','max_weight','gross_exposure','rebalance_sessions','stop_loss','take_profit')},adv_participation=.01),target=g['target_kind']))
     report=dict(title=candidate.get('title',g['model']),family='인공지능 학습 · '+g['model'],market=market,owner_id=candidate.get('user_id'),definition=g,model_proofs=proofs,recipe=recipe,evaluation_months=36,
-      evaluation_window=[start,end],evaluation_protocol=PROTOCOL,performance=performance(books,start,end),selection_scope='os',
+      evaluation_window=[start,end],evaluation_protocol=PROTOCOL,performance=performance(books,start,end,market=market),selection_scope='os',
       training_summary=dict(model=g['model'],model_size=g.get('model_size','classical'),parameters=max((x.get('neural',{}).get('parameter_count',0) for x in proofs),default=0),
                             folds=len(proofs),seconds=time.monotonic()-started,max_train_rows=max(x['train_rows'] for x in proofs),fields=len(names),device='cpu'),
       cases=[case],no_broker_orders=True,independent_holdout=False,weights_retained=False,competition_compliance_verified=False,

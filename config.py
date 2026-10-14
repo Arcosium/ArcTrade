@@ -27,13 +27,14 @@ CORESIGHT_PATH = os.getenv("CORESIGHT_PATH", str(_ARCAIVE / "coresight_logs"))
 
 # ─── Local LLM model assignments (by agent role) ────────────────────────────
 # URL은 설치 시에만 지정한다. 예: http://127.0.0.1:8080/v1
-# llama.cpp 서버는 보통 /v1 을 노출하므로 기본값도 그 형식으로 둔다.
-LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
-LOCAL_ADAPTER_MODEL = "qwen3.6-35b-a3b-uncensored-genesis-lora:latest"
+# SGLang 호환 프록시의 기존 /v1 경로를 사용한다.
+LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1").rstrip("/")
+LOCAL_ADAPTER_MODEL = "arc-local"
 _LOCAL_BASE_MODEL_NAMES = {
     "Qwen3.6-35B-A3B-Uncensored-Claude-Genesis-Q8_0.gguf",
     "qwen3.6-35b-a3b-uncensored",
     "qwen3.6-35b-a3b-uncensored:latest",
+    "qwen3.6-35b-a3b-uncensored-genesis-lora:latest",
 }
 
 
@@ -45,7 +46,7 @@ def _local_llm_model():
 LOCAL_LLM_MODEL = _local_llm_model()
 
 # '+thinking'은 내부 가상 접미사다. 전송 직전에 제거하고 OpenAI 호환 요청의
-# chat_template_kwargs.enable_thinking / reasoning.enabled 로 변환한다.
+# chat_template_kwargs.enable_thinking으로 변환한다.
 LOCAL_LLM_MODEL_THINKING = LOCAL_LLM_MODEL + "+thinking"
 
 _PRO = LOCAL_LLM_MODEL_THINKING  # 결정 에이전트 — thinking ON

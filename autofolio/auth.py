@@ -82,7 +82,7 @@ def bootstrap_admin(username, password):
 
 
 def mutation_guard(request):
-    if request.headers.get('x-requested-with') != 'QuantInSight':
+    if request.headers.get('x-requested-with') not in {'QuantInSight', 'ArcTrade'}:
         raise HTTPException(403, '이 화면에서 다시 요청해 주세요.')
     origin = request.headers.get('origin')
     if origin:
@@ -95,6 +95,8 @@ def user(request):
     value = getattr(request.state, 'user', None)
     if not value:
         raise HTTPException(401, '로그인이 필요합니다.')
+    if value.get('role') != 'admin':
+        raise HTTPException(403, '관리자만 사용할 수 있습니다.')
     return value
 
 
@@ -114,13 +116,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 row = db.execute('SELECT u.id,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id '
                                  'WHERE s.token=? AND s.expires>?',
                                  (hashlib.sha256(token.encode()).hexdigest(), time.time())).fetchone()
-            if row:
+            if row and row['role'] == 'admin':
                 request.state.user = dict(row)
-        public = request.url.path in {'/login', '/api/auth/login', '/api/auth/register',
-                                     '/static/login.html', '/static/login.js', '/static/login.css',
-                                     '/static/observatory.png', '/static/observatory.webp'} or request.url.path.startswith('/static/fonts/')
+        path = request.url.path
+        public_assets = {
+            '/static/index.html', '/static/app.js', '/static/style.css',
+            '/static/crypto.js', '/static/briefing.js', '/static/terminal.js',
+            '/static/login.html', '/static/login.js', '/static/login.css',
+            '/static/observatory.png', '/static/observatory.webp',
+        }
+        public_read = request.method in {'GET', 'HEAD'} and (
+            path in {'/', '/login', '/api/auth/me'} or path in public_assets
+            or path.startswith('/static/fonts/') or path.startswith('/api/public/'))
+        public = public_read or (request.method == 'POST' and path == '/api/auth/login')
+        # Registration stays explicitly retired even for an existing admin session.
+        if path == '/api/auth/register':
+            return JSONResponse({'detail': '회원가입은 종료되었습니다.'}, status_code=410)
         if not public and not request.state.user:
-            if request.url.path.startswith('/api/'):
+            if request.url.path.startswith(('/api/', '/crypto/api/')):
                 return JSONResponse({'detail': '로그인이 필요합니다.'}, status_code=401)
             return RedirectResponse('/login', status_code=303)
         if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
@@ -259,17 +272,7 @@ def login_page(request: Request):
 
 @router.post('/api/auth/register')
 def register(value: Registration, request: Request):
-    throttle(request, 'register')
-    with connect() as db:
-        if not db.execute("SELECT 1 FROM users WHERE role='admin'").fetchone():
-            raise HTTPException(503, '관리자 계정 설정 중입니다.')
-        try:
-            cursor = db.execute('INSERT INTO users(username,password,role,created) VALUES(?,?,?,?)',
-                       (value.username.lower(), password_hash(value.password), 'user', time.time()))
-            store_connections(db, cursor.lastrowid, value)
-        except sqlite3.IntegrityError:
-            raise HTTPException(409, '사용할 수 없는 아이디입니다.')
-    return {'registered': True}
+    raise HTTPException(410, '회원가입은 종료되었습니다.')
 
 
 @router.post('/api/auth/login')
@@ -279,7 +282,7 @@ def login(value: Login, request: Request, response: Response):
         row = db.execute('SELECT * FROM users WHERE username=?', (value.username.lower(),)).fetchone()
         # Use the same work factor even for an unknown account.
         encoded = row['password'] if row else ('00' * 16 + ':' + '00' * 64)
-        if not password_matches(value.password, encoded) or row is None:
+        if not password_matches(value.password, encoded) or row is None or row['role'] != 'admin':
             raise HTTPException(401, '아이디 또는 비밀번호를 확인해 주세요.')
         token = secrets.token_urlsafe(32)
         db.execute('DELETE FROM sessions WHERE expires<?', (time.time(),))
@@ -301,7 +304,7 @@ def logout(request: Request, response: Response):
 
 @router.get('/api/auth/me')
 def me(request: Request):
-    return user(request)
+    return getattr(request.state, 'user', None) or {'role': 'guest', 'username': None}
 
 
 def cipher():

@@ -1,0 +1,14 @@
+[Unit]
+Description=ArcTrade Korean minute paper signals and simulated execution
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/arcosium/projects/ArcTrade
+ExecStart=/usr/bin/python3 -m autofolio.minute_paper
+Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+CPUQuota=100%
+MemoryMax=3G
+Nice=10
+TimeoutStartSec=180
+NoNewPrivileges=true
