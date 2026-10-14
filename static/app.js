@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id), NS='http://www.w3.org/2000/svg';
-const state={book:null,selected:null,detail:null,page:0,tradePage:0,sort:'return',sequence:0,tab:'kr',paperInterval:'day',paperStrategy:null,paperStrategies:[],paperListSequence:0,subtab:'paper',cohortPinned:false,account:null,accountSequence:0,accountTradePage:0,holdingPage:0,seen:new Set(),fresh:new Set(),logAfter:0};
+const state={book:null,selected:null,detail:null,page:0,tradePage:0,sort:'return',sequence:0,tab:'kr',paperInterval:'minute',paperStrategy:null,paperStrategies:[],paperListSequence:0,subtab:'paper',cohortPinned:false,account:null,accountSequence:0,accountTradePage:0,holdingPage:0,seen:new Set(),fresh:new Set(),logAfter:0};
 document.body.dataset.view='kr';
 const signed=v=>Number.isFinite(v)?`${v>0?'▲ ':v<0?'▼ ':''}${Math.abs(v*100).toFixed(2)}%`:'미확인';
 function blank(id,message){const svg=$(id),w=Math.max(290,svg.clientWidth);svg.replaceChildren(node('text',{x:0,y:38},message));svg.setAttribute('viewBox',`0 0 ${w} 64`);svg.style.minHeight='64px';}
@@ -141,7 +141,7 @@ function accountMode(){return state.tab==='kr'?(state.subtab==='paper'?'kr-paper
 async function selectTab(tab,view=null,push=true){
  const admin=state.person?.role==='admin';if(!['today','kr','us','crypto','timefolio','datasets'].includes(tab)||!admin&&!['kr','us','crypto'].includes(tab))tab='kr';if(!admin)view='paper';
  state.page=0;state.book=null;state.paperStrategy=null;state.paperStrategies=[];state.paperListSequence++;state.seen=new Set();state.account=null;state.accountTradePage=0;state.holdingPage=0;state.accountSequence++;
- if(state.tab!==tab){state.logAfter=0;$('log-pane').value='';}state.tab=tab;document.body.dataset.view=tab;document.title=(tab==='today'?'':(MARKET_NAMES[tab]||'데이터셋')+' · ')+'ArcTrade';$('lab-note').textContent='';$('lab-result').textContent='';$('auto-apply-result').textContent='';$('map-selection').hidden=true;
+ if(state.tab!==tab){state.paperInterval=tab==='kr'?'minute':'day';state.logAfter=0;$('log-pane').value='';}state.tab=tab;document.body.dataset.view=tab;document.title=(tab==='today'?'':(MARKET_NAMES[tab]||'데이터셋')+' · ')+'ArcTrade';$('lab-note').textContent='';$('lab-result').textContent='';$('auto-apply-result').textContent='';$('map-selection').hidden=true;
  $('live-stopped').hidden=!(tab==='kr'&&view==='kis-live');$('frontier-mode').value='screened';$('frontier-mode').querySelector('[value=screened]').hidden=false;$('frontier-mode').parentElement.hidden=false;
  state.subtab=(SUBTABS[tab]||[]).some(x=>x[0]===view)?view:(SUBTABS[tab]?.[0]?.[0]||'');state.selected=null;state.cohortPinned=false;$('cohort').value='';
  if(push)history.pushState({},'',`/?market=${tab}&view=${state.subtab}`);
