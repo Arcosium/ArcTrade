@@ -43,7 +43,7 @@ def folder(row):return RUNS/'frontier_paper'/row.get('market','kr')/row['id']
 
 def status(row):
     try:return json.loads((folder(row)/'status.json').read_text())
-    except (OSError,ValueError):return dict(state='queued',message='분봉 검증·운용 모델 준비 대기' if row.get('market')=='kr' else '독립 페이퍼 계좌 준비 대기')
+    except (OSError,ValueError):return dict(state='queued',message='분봉 검증·운용 모델 준비 대기')
 
 
 def save_status(row, **data):
@@ -58,16 +58,19 @@ def snapshot(row, uid, interval):
     result=deployed(paper_market,interval,internal)
     s=status(row)
     result['market']=market;result['strategy']=dict(key=row['id'],title=row['title'])
+    g=row.get('genome',{})
+    if s.get('minute') and g.get('holding_sessions'):
+        result['strategy']['title']=f"{g.get('model','모델')} · {g.get('lookback','')} · {g.get('feature_set','')} · {g['holding_sessions']}분"
+    elif not result.get('execution_interval'):
+        result['strategy']['title']+=' · 분봉 전환 대기'
     if not result['connected']:result['message']=s.get('message','운용 준비 중')
-    result['validation']=dict(state=s.get('state'),minute=s.get('minute'),paper_only=True)
+    result['validation']=dict(state=s.get('state'),minute=s.get('minute'),forward=s.get('forward'),paper_only=True)
     return result
 
 
 def tick():
     from .public_routes import owner_id
-    from .paper import initialize, _advance
-    from .learning import retrain
-    from .observations import record, stock_quotes, mark
+    from .paper import initialize
     initialize();uid=owner_id()
     from .minute_validation import audit_all
     audit_all()
@@ -75,26 +78,8 @@ def tick():
         for row in members(market,uid):
             p=folder(row);internal=identity(uid,market,row['id']);paper_market='kr' if market=='timefolio' else market
             try:
-                if market=='kr':
-                    from .minute_validation import advance_frontier
-                    advance_frontier(row,internal)
-                    continue
-                model=p/'model.joblib'
-                if not model.exists():
-                    with store.connect() as db:r=db.execute('SELECT source FROM strategies WHERE id=?',(row['id'],)).fetchone()
-                    save_status(row,state='training',message='등록된 학습 조건으로 페이퍼 모델 준비 중')
-                    retrain(r['source'],p)
-                dep=dict(id='frontier-'+row['id'],user_id=internal,target=paper_market+'-paper',artifact=str(model))
-                _advance(dep)
-                save_status(row,state='forward_paper',message='독립 페이퍼 운용 · 신규 관측 이후 성과만 기록')
-                with store.connect() as db:r=db.execute('SELECT body FROM paper_books WHERE user_id=? AND market=?',(internal,paper_market)).fetchone()
-                if r:
-                    b=json.loads(r['body']);q=stock_quotes(b['holdings'],paper_market)
-                    if market=='crypto':
-                        from integrations.crypto.market import quotes
-                        raw=quotes(list(b['holdings']));q={k:dict(last=v['last'],ts=v['ts']/1000) for k,v in raw.items()}
-                    value=mark(b,q,time.time())
-                    if value:record(internal,paper_market,'deployed',value['nav'],b['initial'],'live quotes',value['source_ts'])
+                from .minute_validation import advance_frontier
+                advance_frontier(row,internal)
             except Exception as exc:
                 save_status(row,state='waiting_validation',message='검증·데이터 확인 필요: '+type(exc).__name__)
     store.set_setting('frontier_heartbeat',dict(timestamp=time.time()))

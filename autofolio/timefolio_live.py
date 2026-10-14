@@ -60,6 +60,9 @@ def select_contest(browser):
 
 
 def signal(dep,now):
+    from .store import setting
+    if setting('timefolio_minute_paper_enabled',False):
+        return minute_signal(dep,now)
     import joblib
     import pandas as pd
     import pyarrow.parquet as pq
@@ -85,6 +88,31 @@ def signal(dep,now):
     from . import execution
     execution=getattr(learner,'_EXECUTION_MODULE',None) or execution
     return rows.to_dict('records'),g,execution,last
+
+
+def minute_signal(dep,now):
+    """Current completed minute observations, with the strategy's minute weights."""
+    import numpy as np
+    from . import catalogue,minute_paper as minute,execution
+    from .minute_validation import fit_variant
+    row=next((r for r in catalogue.rows() if r['id']==dep['strategy_id']),None)
+    if row is None:raise ValueError('분봉 전략 원본 없음')
+    artifact=fit_variant(row,now.timestamp());g=row['genome']
+    frame=minute.load_prices(artifact['symbols'],now.timestamp(),limit=max(100,g['lookback']+30),market='kr')
+    data=minute.features(frame,g['lookback'],g['holding_sessions'])
+    latest=data.sort_values('date').groupby('symbol',sort=False).tail(1)
+    cutoff=now.replace(tzinfo=None)
+    ages=(cutoff-latest.date).dt.total_seconds()
+    latest=latest[latest.ready & ages.between(60,180) & np.isfinite(latest[artifact['fields']]).all(axis=1)].copy()
+    if latest.empty:raise ValueError('확정 분봉 신호 대기')
+    latest['score']=artifact['model'].predict(latest[artifact['fields']].to_numpy())
+    if artifact.get('target_kind')=='risk_adjusted':
+        latest['score']*=latest.volatility.clip(lower=.001)*np.sqrt(g['holding_sessions'])
+    # One percent of observed minute turnover is stricter than a daily ADV cap.
+    latest['adv20']=latest.close*latest.volume
+    latest=latest[np.isfinite(latest.score) & latest.score.gt(.006)]
+    if latest.empty:return [],g,execution,now.strftime('%Y%m%d%H%M')
+    return latest.to_dict('records'),g,execution,latest.date.max().strftime('%Y%m%d%H%M')
 
 
 def remaining_plan(plan,hold):
@@ -116,8 +144,8 @@ def order_payload(symbol,side,weight,summary,price,limits,adv=0,gross_exposure=1
     return dict(ticker=symbol,side=side,qty=qty,weight_pct=math.floor(qty*price/nav*10000)/100,submit=True)
 
 
-def claim(uid,dep,day,symbol,side):
-    identity=f'{uid}:{day}:{symbol}:{side}'
+def claim(uid,dep,day,symbol,side,slot=None):
+    identity=f'{uid}:{day}:{symbol}:{side}'+(':'+slot if slot else '')
     with connect() as db:
         cur=db.execute("INSERT OR IGNORE INTO timefolio_model_orders VALUES(?,?,?,?,?,?,'submitting',?)",(identity,uid,dep,day,symbol,side,time.time()))
     return identity if cur.rowcount else None
@@ -153,6 +181,8 @@ def _advance(dep,now=None):
     now=now or datetime.now(ZoneInfo('Asia/Seoul'));uid=dep['user_id'];initialize()
     rules=profile();day=now.strftime('%Y%m%d')
     base=dict(deployment=dep['id'],strategy_id=dep['strategy_id'],competition_compliance_verified=False)
+    from .store import setting
+    base['interval']='minute' if setting('timefolio_minute_paper_enabled',False) else 'day'
     if not rules or not rules['start']<=day<=rules['end']:
         return save(uid,**base,status='blocked',message='13회 유효 규정 또는 대회 기간 확인 필요')
     if unresolved(uid):
@@ -198,7 +228,12 @@ def _advance(dep,now=None):
         base['signal_day']=signal_day
         from .period import expected_dates
         last_rebalance=previous.get('last_rebalance')
-        elapsed=len(expected_dates('kr',last_rebalance,signal_day))-1 if last_rebalance and last_rebalance<=signal_day else 0
+        minute_mode=len(signal_day)==12
+        if minute_mode:
+            elapsed=(datetime.strptime(signal_day,'%Y%m%d%H%M')-datetime.strptime(last_rebalance,'%Y%m%d%H%M')).total_seconds()/60 if last_rebalance and len(last_rebalance)==12 else float('inf')
+            base['interval']='minute'
+        else:
+            elapsed=len(expected_dates('kr',last_rebalance,signal_day))-1 if last_rebalance and last_rebalance<=signal_day else 0
         rebalance=previous.get('deployment')!=dep['id'] or not last_rebalance or elapsed>=execution.policy(g)['rebalance_sessions']
         if previous.get('deployment')==dep['id'] and previous.get('signal_day')==signal_day and previous.get('pending_plan'):
             plan=previous['pending_plan']
@@ -234,7 +269,7 @@ def _advance(dep,now=None):
             with activation_lock():
                 if not current_deployment(dep):
                     return dict(status='superseded',message='후속 모델로 전환됨 · 이전 주문 취소')
-                identity=claim(uid,dep['id'],day,symbol,side)
+                identity=claim(uid,dep['id'],day,symbol,side,slot=signal_day if minute_mode else None)
                 if not identity:continue
                 result=browser.place_order(payload)
             status='filled' if result.get('filled') else 'accepted' if result.get('accepted') else 'review_required'

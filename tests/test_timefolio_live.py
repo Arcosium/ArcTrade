@@ -232,3 +232,28 @@ def test_browser_summary_recognizes_liquidated_rows_only_with_zero_totals(monkey
     assert not browser.scrape_summary()['no_holdings_visible']
     page.value='0';page.totals=False
     assert not browser.scrape_summary()['no_holdings_visible']
+
+
+def test_minute_signal_uses_completed_fresh_bars_and_cost_threshold(monkeypatch):
+    import numpy as np
+    import pandas as pd
+    import pytest
+    from autofolio import catalogue,minute_paper,minute_validation
+    g=dict(lookback=20,holding_sessions=3,selection_count=1)
+    row=dict(id='s',genome=g)
+    class Model:
+        def predict(self,x):return np.full(len(x),.02)
+    artifact=dict(symbols=['A'],fields=['r1','r20'],model=Model(),target_kind='return')
+    monkeypatch.setattr(catalogue,'rows',lambda:[row])
+    monkeypatch.setattr(minute_validation,'fit_variant',lambda *args:artifact)
+    dates=pd.date_range('2026-10-14 09:00',periods=64,freq='min')
+    frame=pd.DataFrame(dict(date=dates,symbol='A',close=100+np.arange(64)*.01,volume=10000.))
+    monkeypatch.setattr(minute_paper,'load_prices',lambda *args,**kwargs:frame)
+    # A source loader cannot smuggle a future latest bar into an order signal.
+    now=datetime(2026,10,14,10,1,tzinfo=ZoneInfo('Asia/Seoul'))
+    with pytest.raises(ValueError,match='확정 분봉'):live.minute_signal({'strategy_id':'s'},now)
+    frame=frame[frame.date.le(pd.Timestamp('2026-10-14 10:00'))]
+    records,_,_,stamp=live.minute_signal({'strategy_id':'s'},now)
+    assert stamp=='202610141000' and len(records)==1 and records[0]['score']==.02
+    artifact['model'].predict=lambda x:np.zeros(len(x))
+    assert live.minute_signal({'strategy_id':'s'},now)[0]==[]

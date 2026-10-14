@@ -1,5 +1,5 @@
 [Unit]
-Description=ArcTrade Korean minute paper signals and simulated execution
+Description=ArcTrade KR US crypto minute paper signals and simulated execution
 After=network.target
 
 [Service]

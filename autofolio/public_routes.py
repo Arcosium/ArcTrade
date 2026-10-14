@@ -192,17 +192,26 @@ def deployed(market, interval, uid):
     series = sampled(points, interval)
     if observed and series:
         nav = series[-1]['equity']
-    minute = market=='kr' and book.get('interval')=='minute'
+    minute = book.get('interval')=='minute'
     if minute:
-        result['strategy']['title']='한국주식 분봉 전략'
+        result['strategy']['title']={'kr':'한국주식','us':'미국주식','crypto':'크립토'}.get(market,market)+' 분봉 전략'
         result['execution_interval']='minute'
         result['execution_price']='next_observed_close'
+        from .forward_validation import progress
+        result['validation']=dict(minute=book.get('minute_model'),progress=progress(book,market),paper_only=True)
+        result['signal']={k:book.get('minute',{}).get(k) for k in ('last_observation','last_prediction','prediction_count','ready_symbols')}
+    def trade_stamp(trade):
+        date=str(trade.get('date',''))
+        if len(date)==12 and date.isdigit():
+            zone='UTC' if market=='crypto' else 'America/New_York' if market=='us' else 'Asia/Seoul'
+            return datetime.strptime(date,'%Y%m%d%H%M').replace(tzinfo=ZoneInfo(zone)).timestamp()
+        return trade.get('ts')
     result.update(connected=True, total_eval=nav, cash=number(book.get('cash')),
                   pnl_ratio=nav / initial - 1 if nav is not None and initial and initial > 0 else None,
                   updated=max((p['ts'] for p in points), default=daily_as_of),
                   series=series, equity=series,
                   holdings=safe_rows(book.get('holdings', []), HOLDING_FIELDS),
-                  trades=list(reversed(safe_rows([{**t,'ts':timestamp(t.get('date')) if len(str(t.get('date','')))==12 else t.get('ts')} for t in book.get('trades', []) if isinstance(t,dict)], TRADE_FIELDS))),
+                  trades=list(reversed(safe_rows([{**t,'ts':trade_stamp(t)} for t in book.get('trades', []) if isinstance(t,dict)], TRADE_FIELDS))),
                   message=('분봉 신호 · 다음 관측 종가 체결 · 분봉 전진 검증 중' if minute else '실제 관측 평가 기록' if observed else '일봉 확정 후 다음 시가 체결 모의 · 장중 관측 기록 없음'))
     return freshness(result)
 
@@ -291,11 +300,16 @@ def timefolio_account():
     try:
         with readonly(config.DB) as db:
             row=db.execute('SELECT body FROM timefolio_model_state WHERE user_id=?',(uid,)).fetchone()
-        value=json.loads(row['body']).get('public_account',{}) if row else {}
+        state=json.loads(row['body']) if row else {}
+        value=state.get('public_account',{})
         if value.get('connected'):
             result.update({k:value.get(k) for k in ('connected','updated','total_eval','cash','pnl_ratio')})
             result['holdings']=safe_rows(value.get('holdings',[]),HOLDING_FIELDS)
             result['message']='RFM 13회 실제 모의대회 계좌 · 연구 전략별 페이퍼와 별도'
+            if state.get('interval')=='minute':
+                result['execution_interval']='minute'
+                result['execution_price']='contest_observed_fills'
+                result['message']+=' · 분봉 모델 신호'
     except (OSError,sqlite3.Error,ValueError,TypeError):pass
     return result
 

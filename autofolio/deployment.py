@@ -17,8 +17,6 @@ def initialize():
 def request_retrain(uid,strategy,target,auto_policy=None):
     if target not in ('kr-paper','us-paper','crypto-paper','timefolio'):raise ValueError('정지된 실매매에는 적용할 수 없습니다.')
     from .store import setting
-    if target=='kr-paper' and setting('kr_minute_paper_enabled',False):
-        raise ValueError('국장은 분봉 모델로 운용 중입니다. 일봉 연구 전략은 분봉 검증 없이 적용할 수 없습니다.')
     initialize()
     from .auto_apply import initialize as auto_initialize
     auto_initialize()
@@ -66,6 +64,14 @@ def run(identity):
     activated=False
     try:
         artifact=retrain(r['source'],dest)
+        from .store import setting
+        market=r['target'].removesuffix('-paper')
+        if setting(market+'_minute_paper_enabled',False):
+            from .catalogue import rows
+            from .minute_validation import fit_variant
+            candidate=next((x for x in rows() if x['id']==r['strategy_id']),None)
+            if candidate is None:raise ValueError('분봉 전환할 연구 전략이 없습니다.')
+            fit_variant(candidate,time.time())
         message='재학습 완료 · 다음 시세부터 페이퍼 운용' if r['target'] in ('kr-paper','us-paper','crypto-paper') else '재학습 완료 · 13회 모의계좌 주문 전 규칙 검사 대기'
         from .auto_apply import activation
         with activation(identity):

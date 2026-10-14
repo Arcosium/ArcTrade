@@ -75,7 +75,11 @@ def awaiting_paper_session(uid,market):
         if not db.execute("SELECT 1 FROM sqlite_master WHERE name='paper_books'").fetchone():return False
         row=db.execute('SELECT body FROM paper_books WHERE user_id=? AND market=?',(uid,market)).fetchone()
     if not row:return False
-    book=json.loads(row['body']);pending=book.get('pending') or []
+    book=json.loads(row['body'])
+    if book.get('interval')=='minute':
+        pending=(book.get('minute') or {}).get('pending') or {}
+        return bool(pending.get('buys') or pending.get('sells')) and time.time()-pending.get('created',0)<=720
+    pending=book.get('pending') or []
     orders=bool(pending.get('buys') or pending.get('sells')) if isinstance(pending,dict) else bool(pending)
     return orders and book.get('last_day','')<=book.get('not_before','')
 
@@ -88,8 +92,7 @@ def state(uid, market):
         policy = db.execute('SELECT * FROM auto_apply_policies WHERE user_id=? AND market=?', (uid, market)).fetchone()
     from .auth import get_connection
     available = market != 'timefolio' or bool(get_connection(uid,'timefolio'))
-    minute = market=='kr' and store.setting('kr_minute_paper_enabled',False)
-    if minute:available=False
+    minute = store.setting(market+'_minute_paper_enabled',False)
     message = (f'{LABELS.get(market)} · 켠 이후의 새 OS 9개월 샤프/MDD 파레토 후보 중 샤프 최대, 동률이면 MDD 최소 · 재학습 검증 후 전환'
                if available else '타임폴리오 계정을 먼저 연결해 주세요.')
     if market=='timefolio' and available:
@@ -97,7 +100,7 @@ def state(uid, market):
     if market == 'kr':
         message += ' · 한투 실매매 정지 유지'
     if minute:
-        message='별도 분봉 모델 전진 검증 중 · 일봉 연구 후보의 자동 적용은 분봉 검증 후 가능합니다.'
+        message='새 샤프/MDD 파레토 후보를 분봉 재학습·검증한 뒤 자동 전환합니다.'
     return dict(enabled=bool(policy and policy['enabled']), available=available, target=TARGETS[market],
                 message=message, last_action=policy['message'] if policy else '', updated=policy['updated'] if policy else None)
 
@@ -171,7 +174,6 @@ def tick():
         all_rows = rows()
         for policy in policies:
             uid, market = policy['user_id'], policy['market']
-            if market=='kr' and store.setting('kr_minute_paper_enabled',False):continue
             if uid not in people or market not in LABELS:
                 continue
             candidates = eligible(people[uid], market, all_rows)
