@@ -141,4 +141,42 @@ def test_crypto_public_adapter_filters_research_and_internal_metadata(setup, mon
         assert result['trades'][0]['ts'] == 1_800_000_000
     assert client.get('/api/public/paper/crypto?interval=minute').json()['series'] == []
     listing = client.get('/api/public/strategies?market=crypto').json()
-    assert listing['strategies'] == []
+    assert [r['key'] for r in listing['strategies']] == ['account']
+    assert not listing['strategies'][0]['connected']
+
+
+def test_reauthentication_revokes_old_cookie_and_logout_removes_research_access(setup):
+    client,password=setup
+    headers={'X-Requested-With':'ArcTrade'}
+    credentials={'username':'owner','password':password}
+    assert client.post('/api/auth/login',headers=headers,json=credentials).status_code==200
+    previous=client.cookies.get(auth.COOKIE)
+    assert client.get('/login?reauth=1').status_code==200
+    assert client.post('/api/auth/login',headers=headers,json=credentials).status_code==200
+    with auth.connect() as db:
+        assert db.execute('SELECT 1 FROM sessions WHERE token=?',(hashlib.sha256(previous.encode()).hexdigest(),)).fetchone() is None
+    assert client.post('/api/auth/logout',headers=headers,json={}).status_code==200
+    assert client.get('/api/research').status_code==401
+
+
+def test_account_selected_even_without_frontier_and_pending_is_not_profit(setup,monkeypatch):
+    client,_=setup
+    from autofolio import frontier
+    monkeypatch.setattr(frontier,'members',lambda market,uid:[])
+    result=client.get('/api/public/paper/kr').json()
+    assert result['connected'] and result['strategy']['key']=='account'
+    assert result['total_eval']==110
+    assert client.get('/api/public/paper/kr?strategy=current').status_code==404
+    assert client.get('/api/public/backtest/not-published').status_code==404
+
+
+def test_public_backtest_summary_omits_research_paths_and_account_metadata(setup,monkeypatch):
+    from autofolio import app
+    client,_=setup
+    monkeypatch.setattr(app,'detail',lambda *args:dict(summary=dict(id='current',title='Result',market='kr',source='/private/report',source_digest='private-hash',genome={'secret':'private'},cases=[{'warm_start':'20231014','account':'private'}],training_summary={'model':'ridge','parameters':10,'path':'private'}),daily=[],metrics={},performance={'is':{},'os':{},'ros':{}}))
+    result=client.get('/api/public/backtest/current')
+    assert result.status_code==200
+    assert result.json()['record_type']=='backtest'
+    assert result.json()['summary']['cases']==[{'warm_start':'20231014'}]
+    assert 'private' not in result.text
+    assert client.get('/api/public/backtest/other-user-private').status_code==404

@@ -49,8 +49,18 @@ def eligible(person, market, candidates=None):
             if assessment.get('status') not in ('missing','passed') or not assessment.get('rule_profile'):continue
         metrics=selection_metrics(r)
         if metrics is not None:
-            selected.append(dict(r,net_return=metrics['net_return'],negative_months=metrics['negative_months']))
+            selected.append(dict(r,**{k:v for k,v in metrics.items() if k!='monthly'}))
     return selected
+
+
+def current_front(candidates):
+    cohorts={}
+    for row in candidates:
+        c=cohorts.setdefault(row['cohort'],[tuple(row.get('evaluation_window') or []),0,row.get('sessions',0)])
+        c[1]+=1
+    if not cohorts:return []
+    cohort=max(cohorts,key=lambda c:(cohorts[c][0],cohorts[c][1],cohorts[c][2]))
+    return pareto_front([r for r in candidates if r['cohort']==cohort],return_key='sharpe',loss_key='mdd')
 
 
 def state(uid, market):
@@ -63,7 +73,7 @@ def state(uid, market):
     available = market != 'timefolio' or bool(get_connection(uid,'timefolio'))
     minute = market=='kr' and store.setting('kr_minute_paper_enabled',False)
     if minute:available=False
-    message = (f'{LABELS.get(market)} · 켠 이후의 새 OS 9개월 파레토 후보 중 수익률 최대, 동률이면 손실월 최소 · 재학습 검증 후 전환'
+    message = (f'{LABELS.get(market)} · 켠 이후의 새 OS 9개월 샤프/MDD 파레토 후보 중 샤프 최대, 동률이면 MDD 최소 · 재학습 검증 후 전환'
                if available else '타임폴리오 계정을 먼저 연결해 주세요.')
     if market=='timefolio' and available:
         message+=' · 과거 대회 적합성 인증과 별개로 실제 주문마다 13회 규칙 확인'
@@ -118,11 +128,14 @@ def activation(identity):
     initialize()
     with lock():
         with store.connect() as db:
-            row = db.execute('''SELECT j.revision job_revision,p.revision,p.enabled FROM auto_apply_jobs j
+            row = db.execute('''SELECT j.revision job_revision,j.user_id,j.market,d.strategy_id,p.revision,p.enabled FROM auto_apply_jobs j
+                JOIN model_deployments d ON d.id=j.deployment_id
                 LEFT JOIN auto_apply_policies p ON p.user_id=j.user_id AND p.market=j.market
                 WHERE j.deployment_id=?''', (identity,)).fetchone()
         if row and (not row['enabled'] or row['revision'] != row['job_revision']):
             raise ValueError('자동 적용 해제로 모델 전환을 취소했습니다.')
+        if row and row['strategy_id'] not in {r['id'] for r in current_front(eligible({'id':row['user_id']},row['market']))}:
+            raise ValueError('현재 샤프/MDD 파레토에서 벗어나 자동 전환을 취소했습니다.')
         yield
 
 
@@ -151,11 +164,9 @@ def tick():
             if busy:
                 continue
             # Do not compare different session calendars as one Pareto population.
-            front = []
-            for cohort in {r['cohort'] for r in candidates}:
-                front.extend(pareto_front([r for r in candidates if r['cohort'] == cohort]))
+            front = current_front(candidates)
             fresh = sorted((r for r in front if r['id'] not in seen),
-                           key=lambda r: (-r['net_return'], r['negative_months'], r['id']))
+                           key=lambda r: (-r['sharpe'], abs(r['mdd']), r['id']))
             message = policy['message']
             retry=set()
             if fresh:

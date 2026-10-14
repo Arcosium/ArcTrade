@@ -52,22 +52,23 @@ def targets(identity:str,request:Request):
     return dict(targets=options)
 
 class Apply(BaseModel):
-    target:str
+    target:str|None=None
 
 @router.post('/api/strategy/{identity}/apply')
 def apply(identity:str,value:Apply,request:Request):
     mutation_guard(request);person=user(request)
     if value.target=='kis-live':raise HTTPException(409,'실매매 정지 상태입니다. 전략을 적용할 수 없습니다.')
     options=targets(identity,request)['targets']
-    selected=next((t for t in options if t['id']==value.target),None)
+    target=value.target or (options[0]['id'] if len(options)==1 else None)
+    selected=next((t for t in options if t['id']==target),None)
     if selected is None:raise HTTPException(403,'이 전략의 적용 대상이 아닙니다.')
     if not selected['available']:raise HTTPException(409,selected['reason'] or '현재 적용할 수 없는 계좌입니다.')
     summary,_=strategy_case(identity)
     if not accepts(summary):raise HTTPException(409,'최근 36개월 평가를 통과한 전략만 적용할 수 있습니다.')
     from .deployment import request_retrain
-    try:record=request_retrain(person['id'],identity,value.target)
+    try:record=request_retrain(person['id'],identity,target)
     except ValueError as exc:raise HTTPException(409,str(exc))
-    return dict(target=value.target,strategy_id=identity,status='retraining',message='동일 조건 재학습 요청 · 검증 후 페이퍼 운용 연결',deployment_id=record)
+    return dict(target=target,strategy_id=identity,status='retraining',message='동일 조건 재학습 요청 · 검증 후 페이퍼 운용 연결',deployment_id=record)
 
 @router.get('/api/assignments')
 def assignments(request:Request):

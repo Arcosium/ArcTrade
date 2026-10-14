@@ -29,9 +29,8 @@ def members(market, uid):
     if not cohorts:return []
     cohort=max(cohorts,key=lambda c:(cohorts[c][0],cohorts[c][1],cohorts[c][2]))
     rows=[r for r in eligible if r['cohort']==cohort]
-    ids={r['id'] for y in ['net_return','sharpe'] for x in ['mdd','negative_months']
-         for r in pareto_front(rows,return_key=y,loss_key=x)}
-    return sorted([r for r in rows if r['id'] in ids],key=lambda r:(-r['net_return'],r['id']))
+    ids={r['id'] for r in pareto_front(rows,return_key='sharpe',loss_key='mdd')}
+    return sorted([r for r in rows if r['id'] in ids],key=lambda r:(-r['sharpe'],abs(r['mdd']),r['id']))
 
 
 def identity(uid, market, strategy):

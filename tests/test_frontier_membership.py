@@ -5,6 +5,7 @@ from autofolio import frontier
 def test_current_frontier_hides_dominated_and_old_cohorts(monkeypatch):
     rows=[dict(id='a',market='kr',owner_id=1,genome={'engine':'learned_v1'},cohort='new',evaluation_window=['20231014','20261013'],sessions=200,net_return=.3,sharpe=2.,mdd=-.1,negative_months=2),
           dict(id='b',market='kr',owner_id=1,genome={'engine':'learned_v1'},cohort='new',evaluation_window=['20231014','20261013'],sessions=200,net_return=.1,sharpe=1.,mdd=-.2,negative_months=3)]
+    rows.append(dict(rows[1],id='return-only',net_return=9,negative_months=0))
     rows.append(dict(rows[0],id='old',cohort='old',evaluation_window=['20221014','20251013']))
     rows.append(dict(rows[0],id='other-owner',owner_id=2))
     monkeypatch.setattr(frontier.catalogue,'rows',lambda:rows)

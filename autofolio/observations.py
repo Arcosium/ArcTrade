@@ -83,10 +83,15 @@ def tick(now=None):
         local=datetime.fromtimestamp(now,ZoneInfo('Asia/Seoul'))
         if market=='kr' and not (local.weekday()<5 and (9,0)<=(local.hour,local.minute)<=(15,35)):
             continue
-        if market!='kr':continue
-        value=mark(book,stock_quotes(book['holdings'],market),now)
+        if market not in ('kr','us','crypto'):continue
+        current=stock_quotes(book['holdings'],market)
+        if market=='crypto':
+            from integrations.crypto.market import quotes
+            raw=quotes(list(book['holdings']))
+            current={k:dict(last=v['last'],ts=v['ts']/1000) for k,v in raw.items()}
+        value=mark(book,current,now)
         if value:
-            record(uid,market,book.get('minute_strategy_id') or row['strategy_id'],value['nav'],book['initial'],'CryptoBars KRX 1m',value['source_ts'],now);count+=1
+            record(uid,market,book.get('minute_strategy_id') or row['strategy_id'],value['nav'],book['initial'],'live '+market+' quotes',value['source_ts'],now);count+=1
     from integrations.crypto.app import book_view,BOOKS
     from integrations.crypto.market import quotes
     for key in BOOKS:

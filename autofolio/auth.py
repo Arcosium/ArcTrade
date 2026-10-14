@@ -268,7 +268,7 @@ def throttle(request, action):
 
 @router.get('/login', include_in_schema=False)
 def login_page(request: Request):
-    if getattr(request.state, 'user', None):
+    if getattr(request.state, 'user', None) and request.query_params.get('reauth') != '1':
         return RedirectResponse('/', status_code=303)
     return FileResponse(ROOT / 'static/login.html')
 
@@ -288,6 +288,8 @@ def login(value: Login, request: Request, response: Response):
         if not password_matches(value.password, encoded) or row is None or row['role'] != 'admin':
             raise HTTPException(401, '아이디 또는 비밀번호를 확인해 주세요.')
         token = secrets.token_urlsafe(32)
+        previous = request.cookies.get(COOKIE, '')
+        if previous:db.execute('DELETE FROM sessions WHERE token=?', (hashlib.sha256(previous.encode()).hexdigest(),))
         db.execute('DELETE FROM sessions WHERE expires<?', (time.time(),))
         db.execute('INSERT INTO sessions VALUES(?,?,?)',
                    (hashlib.sha256(token.encode()).hexdigest(), row['id'], time.time() + SESSION_SECONDS))

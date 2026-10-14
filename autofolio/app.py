@@ -80,7 +80,7 @@ def index(identity=None):return FileResponse(ROOT/'static/index.html')
 
 
 @app.get('/api/leaderboard')
-def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",pattern="^(kr|us|crypto|timefolio)$"),known:str|None=Query(None,max_length=40),x_axis:str=Query('negative_months',pattern='^(negative_months|mdd)$'),y_axis:str=Query('net_return',pattern='^(net_return|sharpe)$')):
+def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",pattern="^(kr|us|crypto|timefolio)$"),known:str|None=Query(None,max_length=40),x_axis:str=Query('mdd',pattern='^(negative_months|mdd)$'),y_axis:str=Query('sharpe',pattern='^(net_return|sharpe)$')):
     from .evaluation import selection_metrics
     all_rows=[];learned_only=setting('labs_v2_enabled',False)
     for r in rows():

@@ -15,11 +15,11 @@ def setup(tmp_path, monkeypatch):
         db.execute("INSERT INTO users VALUES(1,'owner','unused','admin',0)")
         db.execute("INSERT INTO users VALUES(2,'member','unused','user',0)")
     monkeypatch.setattr(a, 'accepts', lambda r: r.get('months') == 36)
-    def add(identity, ret, loss, owner=1, market='kr', months=36):
+    def add(identity, ret, loss, owner=1, market='kr', months=36, sharpe=None, mdd=None):
         payload=dict(id=identity,title=identity,owner_id=owner,market=market,months=months,
                      net_return=ret,negative_months=loss,cohort='same',genome={'engine':'learned_v1'})
         from autofolio.evaluation import PROTOCOL
-        payload.update(activity_validation={"version":"os_activity_v1","passed":True},evaluation_protocol=PROTOCOL,performance={'os':dict(months=9,net_return=ret,negative_months=loss,mdd=-.1,sharpe=1.)})
+        payload.update(activity_validation={"version":"os_activity_v1","passed":True},evaluation_protocol=PROTOCOL,performance={'os':dict(months=9,net_return=ret,negative_months=loss,mdd=-loss/100 if mdd is None else mdd,sharpe=ret*10 if sharpe is None else sharpe)})
         source=tmp_path/(identity+'.json');source.write_text(json.dumps({'recipe':{'recipe_id':identity}}))
         with store.connect() as db:
             db.execute('INSERT INTO strategies VALUES(?,?,?,?,?,?,?)',(identity,identity,'ridge','same',json.dumps(payload),str(source),1))
@@ -65,11 +65,11 @@ def test_disable_revision_blocks_inflight_even_after_reenable(setup):
     with a.activation('manual-deployment'):pass
 
 
-def test_multiple_new_frontiers_choose_return_then_loss(setup):
+def test_multiple_new_frontiers_choose_sharpe_then_mdd(setup):
     a.configure({'id':1},'kr',True)
-    setup('low-risk',.1,0);setup('high-return',.5,10)
+    setup('low-risk',.1,0,sharpe=3);setup('high-return',.5,10,sharpe=1)
     a.tick()
-    with store.connect() as db:assert db.execute('SELECT strategy_id FROM model_deployments').fetchone()[0]=='high-return'
+    with store.connect() as db:assert db.execute('SELECT strategy_id FROM model_deployments').fetchone()[0]=='low-risk'
 
 
 def test_auto_validation_failure_keeps_old_assignment_and_removes_new_weights(setup, monkeypatch, tmp_path):
@@ -130,3 +130,12 @@ def test_transient_queue_failure_does_not_consume_candidate(setup,monkeypatch):
         assert 'new' not in json.loads(db.execute('SELECT seen FROM auto_apply_policies').fetchone()[0])
     monkeypatch.setattr(deployment,'request_retrain',original);a.tick()
     with store.connect() as db:assert db.execute('SELECT strategy_id FROM model_deployments').fetchone()[0]=='new'
+
+
+def test_candidate_leaving_sharpe_mdd_frontier_cannot_activate(setup):
+    a.configure({'id':1},'kr',True)
+    setup('first',.5,3,sharpe=1,mdd=-.2);a.tick()
+    with store.connect() as db:identity=db.execute('SELECT id FROM model_deployments').fetchone()[0]
+    setup('new-front',.1,5,sharpe=2,mdd=-.1)
+    with pytest.raises(ValueError,match='샤프/MDD'):
+        with a.activation(identity):pass

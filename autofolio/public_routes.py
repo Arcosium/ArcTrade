@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from . import config
 
@@ -156,10 +156,13 @@ def deployed(market, interval, uid):
         points = observation_points(uid, market, 'deployed')
     # Revalue holdings and the final graph point from the same read-only quote set.
     # This does not execute the pending daily plan or alter the settlement ledger.
-    if market in ('kr','us') and initial and isinstance(book.get('holdings'),dict):
+    if market in ('kr','us','crypto') and initial and isinstance(book.get('holdings'),dict):
         from .observations import stock_quotes,mark
         try:
             now=time.time();quotes=stock_quotes(book['holdings'],market)
+            if market=='crypto':
+                from integrations.crypto.market import quotes as crypto_quotes
+                quotes={k:dict(last=v['last'],ts=v['ts']/1000) for k,v in crypto_quotes(list(book['holdings'])).items()}
             value=mark(book,quotes,now) if quotes else None
             if value:
                 nav=value['nav']
@@ -245,7 +248,9 @@ def crypto(key, interval, uid):
 @router.get('/paper/{market}')
 def paper(market: Market, interval: Interval = 'minute', strategy: str | None = Query(default=None, max_length=64)):
     from .frontier import members, snapshot
-    uid=owner_id();rows=members(market,uid)
+    uid=owner_id()
+    if strategy is None or strategy=='account':return account(market,interval,uid)
+    rows=members(market,uid)
     row=next((r for r in rows if r['id']==strategy),None) if strategy else (rows[0] if rows else None)
     if row is None:
         if strategy:raise HTTPException(404,'현재 파레토 운용 목록에 없는 전략입니다.')
@@ -256,11 +261,11 @@ def paper(market: Market, interval: Interval = 'minute', strategy: str | None = 
 @router.get('/strategies')
 def strategies(market: Market):
     from .frontier import members, snapshot
-    uid=owner_id();items=[snapshot(row,uid,'minute') for row in members(market,uid)]
-    return dict(market=market, selection='latest_cohort_four_axis_frontier_union',
+    uid=owner_id();items=[account(market,'minute',uid)]+[snapshot(row,uid,'minute') for row in members(market,uid)]
+    return dict(market=market, selection='latest_cohort_sharpe_mdd_frontier',
                 strategies=[dict(item['strategy'],market=market,connected=item['connected'],
                     pnl_ratio=item['pnl_ratio'],updated=item['updated'],message=item['message'],
-                    validation=item.get('validation')) for item in items])
+                    validation=item.get('validation'),status_label='운용 계좌' if item['strategy']['key']=='account' else '샤프/MDD 파레토') for item in items])
 
 
 @router.get('/briefing')
@@ -275,7 +280,7 @@ def briefing():
             discoveries.append(dict(id=r['id'],market=market,title=r['title'],net_return=r['net_return'],
                 sharpe=r['sharpe'],negative_months=r['negative_months'],discovered_at=r.get('updated')))
     return dict(as_of=iso(time.time()),charts=charts,news=news(),discoveries=dict(items=discoveries[:12],
-        criteria='현재 검증된 파레토 전략',message='연구 평가이며 페이퍼 운용 성과와 구분합니다.',status='ok'))
+        criteria='현재 샤프/MDD 파레토 전략',message='연구 평가이며 페이퍼 운용 성과와 구분합니다.',status='ok'))
 
 
 @router.get('/timefolio-account')
@@ -292,4 +297,64 @@ def timefolio_account():
             result['holdings']=safe_rows(value.get('holdings',[]),HOLDING_FIELDS)
             result['message']='RFM 13회 실제 모의대회 계좌 · 연구 전략별 페이퍼와 별도'
     except (OSError,sqlite3.Error,ValueError,TypeError):pass
+    return result
+
+
+def account(market, interval, uid):
+    """The sole real paper account, not a newly seeded strategy comparison book."""
+    if market=='timefolio':
+        result=empty(market,'account',interval);value=timefolio_account()
+        result.update(value);result['strategy']=dict(key='account',title='타임폴리오 모의매매 계좌')
+        points=observation_points(uid,'timefolio','account')
+        if number(value.get('updated')) is not None and number(value.get('total_eval')) is not None and number(value.get('pnl_ratio')) is not None:
+            points.append(dict(ts=value['updated'],equity=value['total_eval'],net_return=value['pnl_ratio']))
+        result['series']=result['equity']=sampled(points,interval)
+        return result
+    result=deployed(market,interval,uid)
+    result['strategy']=dict(key='account',title={'kr':'한국주식 분봉 운용 계좌','us':'미국주식 운용 계좌','crypto':'크립토 운용 계좌'}[market])
+    try:
+        with readonly(config.DB) as db:
+            dep=db.execute('SELECT status,updated,strategy_id FROM model_deployments WHERE user_id=? AND target=? ORDER BY updated DESC LIMIT 1',(uid,market+'-paper')).fetchone()
+            bookrow=db.execute('SELECT body FROM paper_books WHERE user_id=? AND market=?',(uid,market)).fetchone()
+        if dep:
+            result['training']=dict(status=dep['status'],updated=dep['updated'],strategy_id=dep['strategy_id'])
+            status={'queued':'재학습 대기','training':'재학습 중','ready':'재학습 완료','failed':'재학습 실패 · 관리자 확인 필요'}.get(dep['status'],dep['status'])
+            result['message']=status+' · '+result['message']
+        if bookrow:
+            book=json.loads(bookrow['body'])
+            if book.get('pending') and not book.get('holdings'):
+                result['message']+=' · 첫 체결 대기 (신호 생성 후 다음 확정 세션 시가)'
+                result['execution_status']='waiting_next_session'
+    except (OSError,sqlite3.Error,ValueError,TypeError):pass
+    return result
+
+
+def published_request(identity):
+    """Only an owner's validated published discovery can cross this boundary."""
+    from .frontier import members
+    uid=owner_id()
+    if not any(row['id']==identity for market in ('kr','us','crypto','timefolio') for row in members(market,uid)):
+        raise HTTPException(404,'현재 공개된 연구 결과가 아닙니다.')
+    return Request({'type':'http','method':'GET','path':'/','headers':[], 'state':{'user':{'id':uid,'role':'admin'}}})
+
+
+@router.get('/backtest/{identity}')
+def backtest(identity:str,phase:int=Query(0,ge=0),months:int=Query(36,ge=36,le=36),symbol:str=Query('',max_length=12),scope:str=Query('os',pattern='^(is|os|ros|all)$')):
+    from .app import detail
+    result=detail(identity,published_request(identity),phase,months,symbol,scope)
+    allowed={'id','title','family','market','cases','training_summary','phase_count','contest_certified','protocol_origin'}
+    summary={k:v for k,v in result['summary'].items() if k in allowed}
+    summary['cases']=[{'warm_start':c.get('warm_start')} for c in summary.get('cases',[])]
+    if summary.get('training_summary'):
+        summary['training_summary']={k:v for k,v in summary['training_summary'].items() if k in ('model','model_size','parameters','folds')}
+    summary.update(source_name='연구 백테스트',verification='IS / OS / ROS 평가',limitations=[],genome={})
+    result['summary']=summary;result['record_type']='backtest'
+    return result
+
+
+@router.get('/backtest/{identity}/trades')
+def backtest_trades(identity:str,phase:int=Query(0,ge=0),months:int=Query(36,ge=36,le=36),symbol:str=Query('',max_length=12),offset:int=Query(0,ge=0),limit:int=Query(25,ge=1,le=200),scope:str=Query('os',pattern='^(is|os|ros|all)$')):
+    from .app import transactions
+    result=transactions(identity,published_request(identity),phase,months,symbol,offset,limit,scope)
+    result['trades']=safe_rows(result['trades'],TRADE_FIELDS|{'pnl','gross','proceeds','cost'})
     return result

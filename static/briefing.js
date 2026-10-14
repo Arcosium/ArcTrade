@@ -35,7 +35,7 @@ const marketBriefing=(()=>{
   $('discoveries-title').title=data.discoveries.criteria+' · '+data.discoveries.message;
   const root=$('today-discoveries');root.replaceChildren();
   if(!data.discoveries.items.length)root.append(el('p',data.discoveries.status==='unavailable'?'연결 확인 중':'새 전략 없음','empty-note'));
-  for(const p of data.discoveries.items){const a=el('a',undefined,'discovery-item');a.href=`/?market=${p.market}&mode=spectator`;a.append(el('span',`${MARKET_NAMES[p.market]||p.market} · ${paperTime(p.discovered_at)}`,'caption'),el('strong',p.title),el('span',`${percent(p.net_return)} · 샤프 ${decimal(p.sharpe)} · OS 손실 ${p.negative_months}/9개월`,'discovery-metrics'));root.append(a);}
+  for(const p of data.discoveries.items){const a=el('a',undefined,'discovery-item');a.href=`/?market=${p.market}&backtest=${p.id}`;a.append(el('span',`${MARKET_NAMES[p.market]||p.market} · ${paperTime(p.discovered_at)}`,'caption'),el('strong',p.title),el('span',`${percent(p.net_return)} · 샤프 ${decimal(p.sharpe)} · OS 손실 ${p.negative_months}/9개월`,'discovery-metrics'));root.append(a);}
  }
  async function load(){
   const seq=++sequence;busy=true;$('today-refresh').disabled=true;$('today-status').textContent='';
