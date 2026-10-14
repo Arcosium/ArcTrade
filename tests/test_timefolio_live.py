@@ -105,3 +105,44 @@ def test_replaced_deployment_cannot_submit_old_signal(monkeypatch,tmp_path):
     assert not live.current_deployment({'id':'d','user_id':2})
     with connection() as db:db.execute("UPDATE strategy_assignments SET strategy_id='replacement'")
     assert not live.current_deployment({'id':'d','user_id':1})
+
+
+def test_manual_clearance_survives_later_cycles_and_model_repurchase(monkeypatch):
+    """Once initial exits are verified, a later model holding must not relock."""
+    import sys, secrets
+    from pathlib import Path
+    from types import SimpleNamespace
+    from autofolio import auth, contest_rules_evidence
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integrations/timefolio'))
+    from Auto_folio.autofolio import timefolio_browser
+
+    state = {'manual_clearance_complete': True}
+    holdings = []
+    class Browser:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def login(self, credentials): return {'logged_in': True}
+        def scrape_summary(self):
+            return {'total_eval': 1e9, 'positions': holdings, 'no_holdings_visible': not holdings}
+        def list_working_orders(self): return [{'ticker': '000001'}]
+    def save(uid, **body):
+        state.clear(); state.update(body); return body
+    monkeypatch.setattr(live, 'initialize', lambda: None)
+    monkeypatch.setattr(live, 'unresolved', lambda uid: False)
+    monkeypatch.setattr(live, 'snapshot', lambda uid: dict(state))
+    monkeypatch.setattr(live, 'save', save)
+    monkeypatch.setattr(live, 'select_contest', lambda browser: 'test')
+    monkeypatch.setattr(live, 'market_open', lambda now: True)
+    monkeypatch.setattr(auth, 'get_connection', lambda *args: {'username': 'fixture', 'password': secrets.token_urlsafe(20)})
+    monkeypatch.setattr(contest_rules_evidence, 'profile', lambda: {'start': '20261001', 'end': '20261031'})
+    monkeypatch.setattr(timefolio_browser, 'TimefolioBrowser', Browser)
+    execution = SimpleNamespace(build_plan=lambda *args: {'sells': [], 'buys': [], 'rebalance': False})
+    monkeypatch.setattr(live, 'signal', lambda *args: ([], {}, execution, '20261013'))
+    dep = {'id': 'd', 'user_id': 1, 'strategy_id': 's'}
+    now = datetime(2026, 10, 14, 12, tzinfo=ZoneInfo('Asia/Seoul'))
+    assert live._advance(dep, now)['manual_clearance_complete'] is True
+    holdings.append({'ticker': '005930', 'qty': 1, 'last_price': 100, 'avg_price': 100})
+    result = live._advance(dep, now)
+    assert result['status'] == 'waiting_orders'
+    assert result['manual_clearance_complete'] is True

@@ -163,6 +163,7 @@ def _advance(dep,now=None):
         positions=[p for p in summary.get('positions',[]) if int(p.get('qty') or 0)>0]
         hold={p['ticker']:p['qty'] for p in positions};marks={p['ticker']:p['last_price'] for p in positions};entries={p['ticker']:p['avg_price'] for p in positions}
         previous=snapshot(uid)
+        base['manual_clearance_complete']=bool(previous.get('manual_clearance_complete'))
         # Keep the existing model idle until the user has manually exited the
         # two positions currently blocking the account. Latch the first clear
         # account observation so future model buys of either symbol are normal.

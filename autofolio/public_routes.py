@@ -175,6 +175,9 @@ def deployed(market, interval, uid):
         if ts is not None and value is not None and value >= 0 and initial and initial > 0:
             points.append({'ts': ts, 'equity': value, 'net_return': value / initial - 1})
     observed = bool(points)
+    # Book writes are worker activity, not evidence of a fresh market valuation.
+    daily_as_of = max((stamp for item in book.get('equity', []) if isinstance(item, dict)
+                       and (stamp := timestamp(item.get('date'))) is not None), default=None)
     # Daily closing returns cannot truthfully supply a minute/hour chart.
     if interval == 'day' and initial and initial > 0:
         for item in book.get('equity', []):
@@ -193,7 +196,7 @@ def deployed(market, interval, uid):
         result['execution_price']='next_observed_close'
     result.update(connected=True, total_eval=nav, cash=number(book.get('cash')),
                   pnl_ratio=nav / initial - 1 if nav is not None and initial and initial > 0 else None,
-                  updated=max((p['ts'] for p in points), default=number(row['updated'])),
+                  updated=max((p['ts'] for p in points), default=daily_as_of),
                   series=series, equity=series,
                   holdings=safe_rows(book.get('holdings', []), HOLDING_FIELDS),
                   trades=list(reversed(safe_rows([{**t,'ts':timestamp(t.get('date')) if len(str(t.get('date','')))==12 else t.get('ts')} for t in book.get('trades', []) if isinstance(t,dict)], TRADE_FIELDS))),

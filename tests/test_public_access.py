@@ -81,7 +81,11 @@ def test_public_whitelist_owner_scope_and_daily_not_faked_as_intraday(setup):
     assert not any(value in json.dumps(result) for value in ['private-', 'deployment', 'assignment', 'user_id'])
     assert client.get('/api/public/paper/us').json()['connected'] is False
     for interval in ['minute', 'hour']:
-        assert client.get('/api/public/paper/kr', params={'interval': interval}).json()['series'] == []
+        intraday = client.get('/api/public/paper/kr', params={'interval': interval}).json()
+        assert intraday['series'] == []
+        assert intraday['updated'] == result['updated']
+        assert intraday['source_age_seconds'] >= result['source_age_seconds']
+        assert intraday['delayed'] is True
     for suffix in ['/kr?interval=week', '/kr?strategy=cnn', '/invalid']:
         assert client.get('/api/public/paper' + suffix).status_code == 422
 
