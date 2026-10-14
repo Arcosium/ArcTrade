@@ -196,8 +196,8 @@ def deployed(market, interval, uid):
                   updated=max((p['ts'] for p in points), default=number(row['updated'])),
                   series=series, equity=series,
                   holdings=safe_rows(book.get('holdings', []), HOLDING_FIELDS),
-                  trades=list(reversed(safe_rows([{**t,'ts':timestamp(t.get('date'))} for t in book.get('trades', []) if isinstance(t,dict)], TRADE_FIELDS))),
-                  message=('분봉 신호 · 다음 관측 종가 체결 · 최소 보유 30분 · 분봉 전진 검증 중' if minute else '실제 관측 평가 기록' if observed else '일봉 확정 후 다음 시가 체결 모의 · 장중 관측 기록 없음'))
+                  trades=list(reversed(safe_rows([{**t,'ts':timestamp(t.get('date')) if len(str(t.get('date','')))==12 else t.get('ts')} for t in book.get('trades', []) if isinstance(t,dict)], TRADE_FIELDS))),
+                  message=('계좌 누적 · 분봉 신호 · 다음 관측 종가 체결 · 최소 보유 30분 · 분봉 전진 검증 중' if minute else '실제 관측 평가 기록' if observed else '일봉 확정 후 다음 시가 체결 모의 · 장중 관측 기록 없음'))
     return freshness(result)
 
 

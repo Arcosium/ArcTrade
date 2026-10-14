@@ -81,6 +81,7 @@ def signal(dep,now):
 
 def remaining_plan(plan,hold):
     """Keep buys after exits while removing only fills already seen in the book."""
+    hold={symbol:qty for symbol,qty in hold.items() if qty>0}
     sells=[symbol for symbol in plan['sells'] if symbol in hold]
     buys=[pick for pick in plan['buys'] if pick['symbol'] not in hold or pick['symbol'] in sells]
     return dict(plan,sells=sells,buys=buys)
@@ -90,7 +91,7 @@ def order_payload(symbol,side,weight,summary,price,limits,adv=0,gross_exposure=1
     nav=float(summary.get('total_eval') or 0)
     if not math.isfinite(nav) or nav<=0:raise ValueError('계좌 평가액 없음')
     positions=summary.get('positions',[])
-    held=next((p for p in positions if p['ticker']==symbol),None)
+    held=next((p for p in positions if p['ticker']==symbol and int(p.get('qty') or 0)>0),None)
     if side=='sell':
         if not held:return None
         return dict(ticker=symbol,side=side,qty=int(held['qty']),weight_pct=max(.01,float(held['weight_pct'])),submit=True,full_liquidation=True)
@@ -159,7 +160,7 @@ def _advance(dep,now=None):
         contest=select_contest(browser);summary=browser.scrape_summary()
         if not summary.get('total_eval'):raise ValueError('대회 평가액 확인 실패')
         base.update(contest_id=contest,signal_day=signal_day,connected=True)
-        positions=summary.get('positions',[])
+        positions=[p for p in summary.get('positions',[]) if int(p.get('qty') or 0)>0]
         hold={p['ticker']:p['qty'] for p in positions};marks={p['ticker']:p['last_price'] for p in positions};entries={p['ticker']:p['avg_price'] for p in positions}
         previous=snapshot(uid)
         # Keep the existing model idle until the user has manually exited the

@@ -12,3 +12,11 @@ def test_residual_shares_use_explicit_full_liquidation():
         TimefolioBrowser()._select_full_liquidation(page)
         assert page.locator('#exitAll').is_checked()
         browser.close()
+
+
+def test_zero_share_rows_do_not_remain_as_pending_exits():
+    from autofolio.timefolio_live import remaining_plan
+    plan={'sells':['005930'],'buys':[{'symbol':'005930'}],'rebalance':True}
+    result=remaining_plan(plan,{'005930':0})
+    assert result['sells']==[] and result['buys']==[{'symbol':'005930'}]
+    assert order_payload('005930','sell',0,{'total_eval':1e9,'positions':[dict(ticker='005930',qty=0,weight_pct=0)]},100000,{'default':.15}) is None
