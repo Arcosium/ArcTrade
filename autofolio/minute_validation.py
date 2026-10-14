@@ -96,7 +96,7 @@ def _fit_variant(row, now):
         fee_per_side=minute.FEE,slippage_per_side=minute.SLIPPAGE,
         message='별도 분봉 전환 모델 · 시간 분리 검증 완료 · 비용 반영 전진 페이퍼 검증 중')
     with threadpool_limits(limits=1):model.fit(data[names].to_numpy(),data.target.to_numpy())
-    artifact=dict(conversion_version=2,model=model,proof=proof,symbols=symbols,day=cutoff.strftime('%Y%m%d'),strategy_id=row['id']+'-minute-v2',created=now,holding_minutes=horizon,lookback=lookback,fields=names,selection_count=g['selection_count'],max_weight=g['max_weight'])
+    artifact=dict(conversion_version=2,model=model,proof=proof,symbols=symbols,day=cutoff.strftime('%Y%m%d'),strategy_id=row['id']+'-minute-v2',created=now,holding_minutes=horizon,lookback=lookback,fields=names,selection_count=g['selection_count'],max_weight=g.get('max_weight',.1))
     temp=p/'minute.tmp';joblib.dump(artifact,temp);temp.replace(p/'minute.joblib');record(row,proof)
     return artifact
 
