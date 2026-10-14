@@ -63,6 +63,23 @@ def current_front(candidates):
     return pareto_front([r for r in candidates if r['cohort']==cohort],return_key='sharpe',loss_key='mdd')
 
 
+def awaiting_paper_session(uid,market):
+    """Let an activated daily model reach one eligible session before replacing it.
+
+    Replacing it sooner resets the pending plan's activation date every day and
+    can indefinitely prevent fills. Empty plans need no protection; after the
+    first eligible completed session, even unfilled plans may be replaced.
+    """
+    if market not in ('kr','us','crypto'):return False
+    with store.connect() as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='paper_books'").fetchone():return False
+        row=db.execute('SELECT body FROM paper_books WHERE user_id=? AND market=?',(uid,market)).fetchone()
+    if not row:return False
+    book=json.loads(row['body']);pending=book.get('pending') or []
+    orders=bool(pending.get('buys') or pending.get('sells')) if isinstance(pending,dict) else bool(pending)
+    return orders and book.get('last_day','')<=book.get('not_before','')
+
+
 def state(uid, market):
     if market not in TARGETS:
         raise HTTPException(404)
@@ -162,6 +179,13 @@ def tick():
             with store.connect() as db:
                 busy = db.execute("SELECT 1 FROM model_deployments WHERE user_id=? AND target=? AND status IN ('queued','training')", (uid, TARGETS[market])).fetchone()
             if busy:
+                continue
+            if awaiting_paper_session(uid,market):
+                # Keep the watermark unchanged, so the current frontier is
+                # reconsidered after the account processes its next session.
+                with store.connect() as db:
+                    db.execute('UPDATE auto_apply_policies SET updated=?,message=? WHERE user_id=? AND market=?',
+                               (time.time(),'현재 모델의 다음 확정 세션 처리 대기 · 새 파레토 자동전환 보류',uid,market))
                 continue
             # Do not compare different session calendars as one Pareto population.
             front = current_front(candidates)

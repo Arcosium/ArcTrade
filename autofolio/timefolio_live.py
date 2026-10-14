@@ -28,7 +28,15 @@ def snapshot(uid):
 
 
 def save(uid,**body):
-    with connect() as db:db.execute('INSERT INTO timefolio_model_state VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET body=excluded.body,updated=excluded.updated',(uid,json.dumps(body,ensure_ascii=False),time.time()))
+    # A failed signal/login must not erase the last observed balance or the
+    # account-wide manual-exit latch. Only reuse plans for the same deployment.
+    with connect() as db:
+        row=db.execute('SELECT body FROM timefolio_model_state WHERE user_id=?',(uid,)).fetchone()
+        previous=json.loads(row['body']) if row else {}
+        if previous.get('deployment')!=body.get('deployment'):
+            previous={k:v for k,v in previous.items() if k in ('public_account','manual_clearance_complete')}
+        body=dict(previous,**body)
+        db.execute('INSERT INTO timefolio_model_state VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET body=excluded.body,updated=excluded.updated',(uid,json.dumps(body,ensure_ascii=False),time.time()))
     return body
 
 
@@ -151,7 +159,6 @@ def _advance(dep,now=None):
         return save(uid,**base,status='review_required',message='이전 주문 접수 여부 확인 필요 · 추가 주문 정지')
     credentials=get_connection(uid,'timefolio')
     if not credentials:return save(uid,**base,status='blocked',message='타임폴리오 계정 연결 필요')
-    records,g,execution,signal_day=signal(dep,now)
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'integrations/timefolio'))
     from Auto_folio.autofolio.timefolio_browser import TimefolioBrowser,TimefolioCredentials
     with TimefolioBrowser(headless=True,live_enabled=market_open(now)) as browser:
@@ -159,7 +166,7 @@ def _advance(dep,now=None):
             raise ValueError('타임폴리오 로그인 실패')
         contest=select_contest(browser);summary=browser.scrape_summary()
         if not summary.get('total_eval'):raise ValueError('대회 평가액 확인 실패')
-        base.update(contest_id=contest,signal_day=signal_day,connected=True)
+        base.update(contest_id=contest,connected=True)
         holdings=[dict(code=p['ticker'],name=p.get('name',p['ticker']),qty=p['qty'],value=p.get('value_krw',p['qty']*p.get('last_price',0)),pnl_ratio=p.get('pnl_pct',0)/100) for p in summary.get('positions',[]) if p.get('qty',0)>0]
         base['public_account']=dict(connected=True,updated=time.time(),total_eval=summary['total_eval'],cash=summary['total_eval']-sum(p['value'] for p in holdings),pnl_ratio=summary['total_eval']/1e9-1,holdings=holdings)
         from .observations import initialize as init_observations,record
@@ -181,6 +188,14 @@ def _advance(dep,now=None):
             if manual_positions:
                 return save(uid,**base,status='waiting_manual_sale',message='삼성전자·SK하이닉스 수동 매도 확인 후 자동매매 시작')
             base['manual_clearance_complete']=True
+        # Account observation remains available after close, even while today's
+        # completed research bars are still being refreshed. No signal is needed
+        # outside the order window, and failed inference cannot discard balance.
+        if not market_open(now):
+            return save(uid,**base,status='waiting_session',message='13회 모델 연결 완료 · 다음 거래시간 대기')
+        save(uid,**base,status='observed',message='13회 계좌 관측 완료 · 모델 신호 확인 중')
+        records,g,execution,signal_day=signal(dep,now)
+        base['signal_day']=signal_day
         from .period import expected_dates
         last_rebalance=previous.get('last_rebalance')
         elapsed=len(expected_dates('kr',last_rebalance,signal_day))-1 if last_rebalance and last_rebalance<=signal_day else 0

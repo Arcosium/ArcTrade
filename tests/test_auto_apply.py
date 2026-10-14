@@ -139,3 +139,46 @@ def test_candidate_leaving_sharpe_mdd_frontier_cannot_activate(setup):
     setup('new-front',.1,5,sharpe=2,mdd=-.1)
     with pytest.raises(ValueError,match='샤프/MDD'):
         with a.activation(identity):pass
+
+
+def test_pending_first_session_defers_auto_switch_without_consuming_candidate(setup):
+    from autofolio import paper
+    paper.initialize()
+    setup('old',.1,5,market='crypto');a.configure({'id':1},'crypto',True)
+    setup('new',.2,4,market='crypto')
+    book={'last_day':'20261013','not_before':'20261014',
+          'pending':{'buys':[{'symbol':'BTC'}],'sells':[]}}
+    with store.connect() as db:
+        db.execute("INSERT INTO paper_books VALUES(1,'crypto','active',?,0)",(json.dumps(book),))
+    a.tick();a.tick()
+    with store.connect() as db:
+        assert not db.execute('SELECT * FROM model_deployments').fetchall()
+        assert 'new' not in json.loads(db.execute('SELECT seen FROM auto_apply_policies').fetchone()[0])
+        # Merely seeing activation-day history is not a future fill session.
+        book['last_day']='20261014'
+        db.execute('UPDATE paper_books SET body=?',(json.dumps(book),))
+    a.tick()
+    with store.connect() as db:
+        assert not db.execute('SELECT * FROM model_deployments').fetchall()
+        # Release even if some orders remain unfilled after an eligible session.
+        book['last_day']='20261015'
+        db.execute('UPDATE paper_books SET body=?',(json.dumps(book),))
+    a.tick()
+    with store.connect() as db:
+        assert db.execute('SELECT strategy_id FROM model_deployments').fetchone()[0]=='new'
+
+
+def test_empty_plan_never_blocks_auto_switch_and_manual_request_is_available(setup):
+    from autofolio import paper
+    paper.initialize()
+    setup('old',.1,5,market='crypto');a.configure({'id':1},'crypto',True)
+    setup('new',.2,4,market='crypto')
+    book={'last_day':'20261013','not_before':'20261014',
+          'pending':{'buys':[],'sells':[],'rebalance':True}}
+    with store.connect() as db:
+        db.execute("INSERT INTO paper_books VALUES(1,'crypto','active',?,0)",(json.dumps(book),))
+    assert not a.awaiting_paper_session(1,'crypto')
+    book['pending']['buys']=[{'symbol':'BTC'}]
+    with store.connect() as db:db.execute('UPDATE paper_books SET body=?',(json.dumps(book),))
+    assert a.awaiting_paper_session(1,'crypto')
+    assert deployment.request_retrain(1,'new','crypto-paper')

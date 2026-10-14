@@ -112,7 +112,7 @@ def test_manual_clearance_survives_later_cycles_and_model_repurchase(monkeypatch
     import sys, secrets
     from pathlib import Path
     from types import SimpleNamespace
-    from autofolio import auth, contest_rules_evidence
+    from autofolio import auth, contest_rules_evidence, observations
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integrations/timefolio'))
     from Auto_folio.autofolio import timefolio_browser
 
@@ -133,6 +133,8 @@ def test_manual_clearance_survives_later_cycles_and_model_repurchase(monkeypatch
     monkeypatch.setattr(live, 'snapshot', lambda uid: dict(state))
     monkeypatch.setattr(live, 'save', save)
     monkeypatch.setattr(live, 'select_contest', lambda browser: 'test')
+    monkeypatch.setattr(observations, 'initialize', lambda: None)
+    monkeypatch.setattr(observations, 'record', lambda *args: None)
     monkeypatch.setattr(live, 'market_open', lambda now: True)
     monkeypatch.setattr(auth, 'get_connection', lambda *args: {'username': 'fixture', 'password': secrets.token_urlsafe(20)})
     monkeypatch.setattr(contest_rules_evidence, 'profile', lambda: {'start': '20261001', 'end': '20261031'})
@@ -146,3 +148,87 @@ def test_manual_clearance_survives_later_cycles_and_model_repurchase(monkeypatch
     result = live._advance(dep, now)
     assert result['status'] == 'waiting_orders'
     assert result['manual_clearance_complete'] is True
+
+
+def test_failed_cycle_preserves_account_and_plan_but_new_model_drops_plan(monkeypatch,tmp_path):
+    import sqlite3
+    from contextlib import contextmanager
+    @contextmanager
+    def connection():
+        with sqlite3.connect(tmp_path/'state.db') as db:
+            db.row_factory=sqlite3.Row
+            yield db
+    monkeypatch.setattr(live,'connect',connection)
+    live.initialize()
+    account={'connected':True,'updated':123,'total_eval':900_000_000}
+    live.save(1,deployment='a',public_account=account,manual_clearance_complete=True,
+              pending_plan={'sells':['X'],'buys':[]},last_rebalance='20261013',status='connected')
+    failed=live.save(1,deployment='a',status='blocked',message='signal unavailable')
+    assert failed['public_account']==account
+    assert failed['manual_clearance_complete']
+    assert failed['pending_plan']['sells']==['X']
+    assert failed['last_rebalance']=='20261013'
+    replaced=live.save(1,deployment='b',status='blocked')
+    assert replaced['public_account']==account and replaced['manual_clearance_complete']
+    assert 'pending_plan' not in replaced and 'last_rebalance' not in replaced
+
+
+def test_closed_session_observes_balance_without_requiring_fresh_signal(monkeypatch):
+    import sys,secrets
+    from pathlib import Path
+    from autofolio import auth,contest_rules_evidence,observations
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'integrations/timefolio'))
+    from Auto_folio.autofolio import timefolio_browser
+    class Browser:
+        def __init__(self,**kwargs):assert kwargs['live_enabled'] is False
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def login(self,credentials):return {'logged_in':True}
+        def scrape_summary(self):return {'total_eval':913807000,'positions':[],'no_holdings_visible':True}
+    monkeypatch.setattr(live,'initialize',lambda:None)
+    monkeypatch.setattr(live,'unresolved',lambda uid:False)
+    monkeypatch.setattr(live,'snapshot',lambda uid:{})
+    monkeypatch.setattr(live,'save',lambda uid,**body:body)
+    monkeypatch.setattr(live,'select_contest',lambda browser:'fixture')
+    monkeypatch.setattr(live,'market_open',lambda now:False)
+    monkeypatch.setattr(live,'signal',lambda *args:(_ for _ in ()).throw(AssertionError('closed-session inference')))
+    monkeypatch.setattr(auth,'get_connection',lambda *args:{'username':'fixture','password':secrets.token_urlsafe(20)})
+    monkeypatch.setattr(contest_rules_evidence,'profile',lambda:{'start':'20261001','end':'20261031'})
+    monkeypatch.setattr(timefolio_browser,'TimefolioBrowser',Browser)
+    monkeypatch.setattr(observations,'initialize',lambda:None)
+    monkeypatch.setattr(observations,'record',lambda *args:None)
+    result=live._advance({'id':'d','user_id':1,'strategy_id':'s'},datetime(2026,10,14,17,tzinfo=ZoneInfo('Asia/Seoul')))
+    assert result['status']=='waiting_session'
+    assert result['public_account']['total_eval']==913807000
+    assert result['manual_clearance_complete']
+
+
+def test_browser_summary_recognizes_liquidated_rows_only_with_zero_totals(monkeypatch):
+    import json,shutil,subprocess,sys
+    from pathlib import Path
+    import pytest
+    node=shutil.which('node')
+    if not node:pytest.skip('JavaScript runtime needed for the browser parser regression')
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'integrations/timefolio'))
+    from Auto_folio.autofolio.timefolio_browser import TimefolioBrowser
+    browser=object.__new__(TimefolioBrowser)
+    class Page:
+        qty='0';value='0';totals=True
+        def evaluate(self,source,text):
+            fixture={'source':source,'text':text,'cells':['005930','fixture','100','0',self.qty,'0',self.value,'100','0','0']}
+            runner="""const f=JSON.parse(require('fs').readFileSync(0,'utf8'));
+              const row={children:f.cells.map(t=>({innerText:t,textContent:t}))};
+              const table={innerText:'잔고 / 비중 / 평가액',querySelectorAll:()=>[row]};
+              global.document={body:{innerText:f.text},querySelectorAll:()=>[table]};
+              process.stdout.write(JSON.stringify(eval('('+f.source+')')(f.text)));"""
+            return json.loads(subprocess.check_output([node,'-e',runner],input=json.dumps(fixture).encode()))
+    page=Page()
+    monkeypatch.setattr(browser,'_require_page',lambda:page)
+    monkeypatch.setattr(browser,'_body_text',lambda p:'NAV 913.807 보유 잔고 '+('Totals: 0.0 0 0' if p.totals else 'loading'))
+    assert browser.scrape_summary()['no_holdings_visible']
+    page.qty='1'
+    assert not browser.scrape_summary()['no_holdings_visible']
+    page.qty='0';page.value='1'
+    assert not browser.scrape_summary()['no_holdings_visible']
+    page.value='0';page.totals=False
+    assert not browser.scrape_summary()['no_holdings_visible']

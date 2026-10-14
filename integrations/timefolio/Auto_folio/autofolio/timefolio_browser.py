@@ -223,7 +223,10 @@ class TimefolioBrowser:
                     });
                   }
                 }
-                const hasNoHoldingTotals = positions.length === 0 && /보유\s*잔고[\s\S]*Totals:\s*0\.0\s+0\s+0/.test(allText);
+                // The contest keeps fully liquidated rows in its holdings table.
+                // Require both zero row balances and the explicit zero total.
+                const hasNoHoldingTotals = positions.every(p => p.qty === 0 && p.value_krw === 0)
+                  && /보유\s*잔고[\s\S]*Totals:\s*0\.0\s+0\s+0/.test(allText);
                 return {
                   text: allText.slice(0, 5000),
                   nav_text: nav ? nav[1] : '',
