@@ -30,6 +30,9 @@ def setup(tmp_path, monkeypatch):
                     equity=[dict(date='20261012', net_return=0), dict(date='20261013', net_return=.1)])
         db.execute('INSERT INTO paper_books VALUES(?,?,?,?,?)', (1, 'kr', 'private-deployment', json.dumps(book), time.time()))
         db.execute('INSERT INTO paper_books VALUES(?,?,?,?,?)', (2, 'us', 'member-only', json.dumps(book), time.time()))
+    from autofolio import frontier
+    monkeypatch.setattr(frontier,'members',lambda market,uid: [dict(id='current',market='kr',title='Current')] if market=='kr' else [])
+    monkeypatch.setattr(frontier,'identity',lambda uid,market,strategy:uid)
     app = FastAPI()
     app.add_middleware(auth.AuthMiddleware)
     app.include_router(auth.router)
@@ -73,7 +76,7 @@ def test_guest_only_sees_paper_and_existing_member_sessions_are_rejected(setup):
 
 def test_public_whitelist_owner_scope_and_daily_not_faked_as_intraday(setup):
     client, _ = setup
-    result = client.get('/api/public/paper/kr').json()
+    result = client.get('/api/public/paper/kr?interval=day').json()
     assert result['connected'] and len(result['series']) == 2
     assert result['series'][-1]['net_return'] == .1
     assert result['total_eval'] == 110
@@ -86,7 +89,8 @@ def test_public_whitelist_owner_scope_and_daily_not_faked_as_intraday(setup):
         assert intraday['updated'] == result['updated']
         assert intraday['source_age_seconds'] >= result['source_age_seconds']
         assert intraday['delayed'] is True
-    for suffix in ['/kr?interval=week', '/kr?strategy=cnn', '/invalid']:
+    assert client.get('/api/public/paper/kr?strategy=cnn').status_code == 404
+    for suffix in ['/kr?interval=week', '/invalid']:
         assert client.get('/api/public/paper' + suffix).status_code == 422
 
 
@@ -128,7 +132,8 @@ def test_crypto_public_adapter_filters_research_and_internal_metadata(setup, mon
     monkeypatch.setitem(sys.modules, 'integrations.crypto.app', types.SimpleNamespace(book_view=lambda key: raw))
     monkeypatch.setattr(crypto_view, 'paper_series', lambda key: (raw['series'], ''))
     for key in public.CRYPTO_TITLES:
-        result = client.get('/api/public/paper/crypto', params={'strategy': key, 'interval': 'hour'}).json()
+        result = public.crypto(key,'hour',1)
+        assert client.get('/api/public/paper/crypto', params={'strategy': key}).status_code == 404
         assert result['connected']
         assert result['series'] == [{'ts': 1_800_000_000, 'equity': 11000, 'net_return': pytest.approx(.1)}]
         assert not any(value in json.dumps(result) for value in ['private', 'research_sharpe', 'last_signal'])
@@ -136,4 +141,4 @@ def test_crypto_public_adapter_filters_research_and_internal_metadata(setup, mon
         assert result['trades'][0]['ts'] == 1_800_000_000
     assert client.get('/api/public/paper/crypto?interval=minute').json()['series'] == []
     listing = client.get('/api/public/strategies?market=crypto').json()
-    assert {row['key'] for row in listing['strategies']} == set(public.CRYPTO_TITLES) | {'deployed'}
+    assert listing['strategies'] == []

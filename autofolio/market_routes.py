@@ -9,7 +9,7 @@ from .store import connect,set_setting
 from .period import accepts
 from .catalogue import strategy_case
 router=APIRouter()
-TARGETS={'kr-paper':('kr','한국주식 페이퍼매매'), 'kis-live':('kr','한투 실매매 · 정지'),
+TARGETS={'kr-paper':('kr','한국주식 페이퍼매매'),
          'us-paper':('us','미국주식 페이퍼매매'),'crypto-paper':('crypto','크립토 페이퍼매매'),
          'timefolio':('timefolio','타임폴리오 13회 모의매매')}
 
@@ -27,6 +27,7 @@ def control(market:str,value:Control,request:Request):
     mutation_guard(request);person=admin_required(request);research.domains(market)
     set_setting('research_campaign_owner',person['id']);set_setting('labs_v2_enabled',True)
     labs.control(market,value.enabled)
+    if market=='kr':set_setting('minute_validation_enabled',value.enabled)
     return dict(market=market,enabled=value.enabled,message='연속 연구 시작' if value.enabled else '중지됨 · 실행 중 실험은 완료 후 종료')
 
 @router.get('/api/strategy/{identity}/targets')

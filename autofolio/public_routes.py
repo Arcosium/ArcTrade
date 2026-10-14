@@ -15,11 +15,11 @@ from fastapi import APIRouter, HTTPException, Query
 from . import config
 
 router = APIRouter(prefix='/api/public')
-Market = Literal['kr', 'us', 'crypto']
+Market = Literal['kr', 'us', 'crypto', 'timefolio']
 Interval = Literal['minute', 'hour', 'day']
 CRYPTO_TITLES = {'cnn': 'CNN 가중', 'cnn_equal': 'CNN 기본', 'v1': 'GBM v1',
                  'v2': 'GBM v2', 'v2d': 'GBM 1d'}
-TITLES = {'kr': '한국주식 운용 전략', 'us': '미국주식 운용 전략', 'crypto': '크립토 운용 전략'}
+TITLES = {'kr': '한국주식 운용 전략', 'us': '미국주식 운용 전략', 'crypto': '크립토 운용 전략', 'timefolio': '타임폴리오 전략 페이퍼'}
 
 
 @contextmanager
@@ -124,7 +124,7 @@ TRADE_FIELDS = {'date', 'ts', 'code', 'name', 'qty', 'price', 'side', 'fee', 're
 
 def empty(market, key, interval):
     return {'market': market, 'strategy': {'key': key, 'title': CRYPTO_TITLES.get(key, TITLES[market])},
-            'connected': False, 'currency': 'KRW' if market == 'kr' else 'USD', 'interval': interval,
+            'connected': False, 'currency': 'KRW' if market in ('kr','timefolio') else 'USD', 'interval': interval,
             'series': [], 'equity': [], 'total_eval': None, 'cash': None, 'pnl_ratio': None,
             'updated': None, 'holdings': [], 'trades': [], 'message': '아직 공개할 페이퍼 운용 기록이 없습니다.'}
 
@@ -156,7 +156,7 @@ def deployed(market, interval, uid):
         points = observation_points(uid, market, 'deployed')
     # Revalue holdings and the final graph point from the same read-only quote set.
     # This does not execute the pending daily plan or alter the settlement ledger.
-    if market=='kr' and initial and isinstance(book.get('holdings'),dict):
+    if market in ('kr','us') and initial and isinstance(book.get('holdings'),dict):
         from .observations import stock_quotes,mark
         try:
             now=time.time();quotes=stock_quotes(book['holdings'],market)
@@ -200,7 +200,7 @@ def deployed(market, interval, uid):
                   series=series, equity=series,
                   holdings=safe_rows(book.get('holdings', []), HOLDING_FIELDS),
                   trades=list(reversed(safe_rows([{**t,'ts':timestamp(t.get('date')) if len(str(t.get('date','')))==12 else t.get('ts')} for t in book.get('trades', []) if isinstance(t,dict)], TRADE_FIELDS))),
-                  message=('계좌 누적 · 분봉 신호 · 다음 관측 종가 체결 · 최소 보유 30분 · 분봉 전진 검증 중' if minute else '실제 관측 평가 기록' if observed else '일봉 확정 후 다음 시가 체결 모의 · 장중 관측 기록 없음'))
+                  message=('분봉 신호 · 다음 관측 종가 체결 · 분봉 전진 검증 중' if minute else '실제 관측 평가 기록' if observed else '일봉 확정 후 다음 시가 체결 모의 · 장중 관측 기록 없음'))
     return freshness(result)
 
 
@@ -243,19 +243,53 @@ def crypto(key, interval, uid):
 
 
 @router.get('/paper/{market}')
-def paper(market: Market, interval: Interval = 'day', strategy: str | None = Query(default=None, max_length=30)):
-    key = strategy or ('cnn' if market == 'crypto' else 'deployed')
-    if key != 'deployed' and (market != 'crypto' or key not in CRYPTO_TITLES):
-        raise HTTPException(422, '지원하지 않는 공개 전략입니다.')
-    uid = owner_id()
-    return deployed(market, interval, uid) if key == 'deployed' else crypto(key, interval, uid)
+def paper(market: Market, interval: Interval = 'minute', strategy: str | None = Query(default=None, max_length=64)):
+    from .frontier import members, snapshot
+    uid=owner_id();rows=members(market,uid)
+    row=next((r for r in rows if r['id']==strategy),None) if strategy else (rows[0] if rows else None)
+    if row is None:
+        if strategy:raise HTTPException(404,'현재 파레토 운용 목록에 없는 전략입니다.')
+        return empty(market,'deployed',interval)
+    return snapshot(row,uid,interval)
 
 
 @router.get('/strategies')
 def strategies(market: Market):
-    uid = owner_id()
-    snapshots = [deployed(market, 'day', uid)]
-    if market == 'crypto':
-        snapshots = [crypto(key, 'day', uid) for key in CRYPTO_TITLES] + snapshots
-    return {'market': market, 'strategies': [dict(item['strategy'], market=market,
-            connected=item['connected'], pnl_ratio=item['pnl_ratio'], updated=item['updated']) for item in snapshots]}
+    from .frontier import members, snapshot
+    uid=owner_id();items=[snapshot(row,uid,'minute') for row in members(market,uid)]
+    return dict(market=market, selection='latest_cohort_four_axis_frontier_union',
+                strategies=[dict(item['strategy'],market=market,connected=item['connected'],
+                    pnl_ratio=item['pnl_ratio'],updated=item['updated'],message=item['message'],
+                    validation=item.get('validation')) for item in items])
+
+
+@router.get('/briefing')
+def briefing():
+    from .briefing import chart, news, MARKETS, iso
+    from concurrent.futures import ThreadPoolExecutor
+    from .frontier import members
+    with ThreadPoolExecutor(max_workers=3) as pool:charts=list(pool.map(chart,MARKETS))
+    discoveries=[];uid=owner_id()
+    for market in ('kr','us','crypto','timefolio'):
+        for r in members(market,uid):
+            discoveries.append(dict(id=r['id'],market=market,title=r['title'],net_return=r['net_return'],
+                sharpe=r['sharpe'],negative_months=r['negative_months'],discovered_at=r.get('updated')))
+    return dict(as_of=iso(time.time()),charts=charts,news=news(),discoveries=dict(items=discoveries[:12],
+        criteria='현재 검증된 파레토 전략',message='연구 평가이며 페이퍼 운용 성과와 구분합니다.',status='ok'))
+
+
+@router.get('/timefolio-account')
+def timefolio_account():
+    """Read an already-observed contest account; never login or order from public reads."""
+    result=dict(connected=False,message='실제 대회 계좌 관측 대기',holdings=[])
+    uid=owner_id()
+    try:
+        with readonly(config.DB) as db:
+            row=db.execute('SELECT body FROM timefolio_model_state WHERE user_id=?',(uid,)).fetchone()
+        value=json.loads(row['body']).get('public_account',{}) if row else {}
+        if value.get('connected'):
+            result.update({k:value.get(k) for k in ('connected','updated','total_eval','cash','pnl_ratio')})
+            result['holdings']=safe_rows(value.get('holdings',[]),HOLDING_FIELDS)
+            result['message']='RFM 13회 실제 모의대회 계좌 · 연구 전략별 페이퍼와 별도'
+    except (OSError,sqlite3.Error,ValueError,TypeError):pass
+    return result

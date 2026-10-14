@@ -160,6 +160,9 @@ def _advance(dep,now=None):
         contest=select_contest(browser);summary=browser.scrape_summary()
         if not summary.get('total_eval'):raise ValueError('대회 평가액 확인 실패')
         base.update(contest_id=contest,signal_day=signal_day,connected=True)
+        holdings=[dict(code=p['ticker'],name=p.get('name',p['ticker']),qty=p['qty'],value=p.get('value_krw',p['qty']*p.get('last_price',0)),pnl_ratio=p.get('pnl_pct',0)/100) for p in summary.get('positions',[]) if p.get('qty',0)>0]
+        base['public_account']=dict(connected=True,updated=time.time(),total_eval=summary['total_eval'],cash=summary['total_eval']-sum(p['value'] for p in holdings),pnl_ratio=summary['total_eval']/1e9-1,holdings=holdings)
+
         positions=[p for p in summary.get('positions',[]) if int(p.get('qty') or 0)>0]
         hold={p['ticker']:p['qty'] for p in positions};marks={p['ticker']:p['last_price'] for p in positions};entries={p['ticker']:p['avg_price'] for p in positions}
         previous=snapshot(uid)

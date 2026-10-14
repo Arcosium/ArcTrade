@@ -119,6 +119,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if row and row['role'] == 'admin':
                 request.state.user = dict(row)
         path = request.url.path
+        if path.startswith('/api/accounts/kis-'):
+            return JSONResponse({'detail':'ArcTrade의 한투 매매 기능은 종료되었습니다.'},status_code=410)
         public_assets = {
             '/static/index.html', '/static/app.js', '/static/style.css',
             '/static/crypto.js', '/static/briefing.js', '/static/terminal.js',
@@ -232,7 +234,7 @@ def connection_metadata(user_id):
     with connect() as db:
         kinds = {row['kind'] for row in db.execute('SELECT kind FROM connections WHERE user_id=?', (user_id,))}
     return {'connections': [{'kind': kind, 'configured': kind in kinds}
-                            for kind in ('kis-live', 'timefolio')]}
+                            for kind in ('timefolio',)]}
 
 
 @router.get('/api/auth/connections')
@@ -242,6 +244,7 @@ def connections_status(request: Request):
 
 @router.post('/api/auth/connections')
 def save_connections(value: Connections, request: Request):
+    if value.kis is not None:raise HTTPException(410,'ArcTrade의 한투 연결 기능은 종료되었습니다.')
     current = user(request)
     with connect() as db:
         store_connections(db, current['id'], value)

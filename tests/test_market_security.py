@@ -25,9 +25,9 @@ def test_members_cannot_read_owner_accounts_or_change_limits(member):
     for mode in ['kis-live','timefolio']:
         with patch('autofolio.controls.subprocess.run') as run:
             r=member.get('/api/accounts/'+mode)
-            assert r.status_code==401
+            assert r.status_code==(410 if mode=='kis-live' else 401)
             run.assert_not_called()
-    assert member.get('/api/accounts/kis-paper').status_code==401
+    assert member.get('/api/accounts/kis-paper').status_code==410
     assert member.post('/api/resources',headers=H,json=dict(cpu_cores=1,memory_gb=2,parallel=1)).status_code==401
     assert member.get('/api/status').status_code==401
     assert member.get('/api/logs').status_code==401

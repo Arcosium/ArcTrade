@@ -56,19 +56,23 @@ def load_prices(symbols, now, path=None, limit=BAR_LIMIT):
     return pd.concat(frames,ignore_index=True) if frames else pd.DataFrame(columns=['date','symbol','close','volume'])
 
 
-def features(prices):
+def features(prices, window=20, horizon=HOLD_MINUTES):
     import numpy as np
     import pandas as pd
     p=prices.sort_values(['symbol','date']).copy()
     group=p.groupby('symbol',sort=False)
     for n in (1,5,20):p['r'+str(n)]=group.close.pct_change(n,fill_method=None)
-    p['trend']=p.close/group.close.transform(lambda x:x.rolling(20).mean())-1
-    p['volatility']=p.groupby('symbol').r1.transform(lambda x:x.rolling(20).std())
-    p['ready']=((p.date-group.date.shift(20)).eq(pd.Timedelta(minutes=20)) & np.isfinite(p[FEATURES]).all(axis=1))
-    entry=group.close.shift(-1);last=group.close.shift(-HOLD_MINUTES-1)
-    p['label_end']=group.date.shift(-HOLD_MINUTES-1)
+    p['trend']=p.close/group.close.transform(lambda x:x.rolling(window).mean())-1
+    p['volatility']=p.groupby('symbol').r1.transform(lambda x:x.rolling(window).std())
+    p['r20']=group.close.pct_change(window,fill_method=None)
+    p['volume_ratio']=p.volume/group.volume.transform(lambda x:x.rolling(window).mean()).replace(0,np.nan)-1
+    p['downside_vol']=p.r1.clip(upper=0).pow(2).groupby(p.symbol).transform(lambda x:x.rolling(window).mean()).pow(.5)
+    history=max(20,window)
+    p['ready']=((p.date-group.date.shift(history)).eq(pd.Timedelta(minutes=history)) & np.isfinite(p[FEATURES]).all(axis=1))
+    entry=group.close.shift(-1);last=group.close.shift(-horizon-1)
+    p['label_end']=group.date.shift(-horizon-1)
     p['target']=last/entry-1
-    causal=(group.date.shift(-1)-p.date).eq(pd.Timedelta(minutes=1)) & (p.label_end-p.date).eq(pd.Timedelta(minutes=HOLD_MINUTES+1))
+    causal=(group.date.shift(-1)-p.date).eq(pd.Timedelta(minutes=1)) & (p.label_end-p.date).eq(pd.Timedelta(minutes=horizon+1))
     p.loc[~causal,'target']=np.nan
     return p
 
@@ -140,7 +144,8 @@ def advance_book(original, frame, artifact, now):
     book=copy.deepcopy(original)
     local=datetime.fromtimestamp(now,TZ)
     if local.weekday()>4 or not (540<=local.hour*60+local.minute<920):return book
-    p=features(frame)
+    horizon=artifact.get('holding_minutes',HOLD_MINUTES)
+    p=features(frame,artifact.get('lookback',20),horizon)
     if p.empty:return book
     latest=p.sort_values('date').groupby('symbol',sort=False).tail(1).set_index('symbol')
     def stamp(row):return row['date'].to_pydatetime().replace(tzinfo=TZ).timestamp()
@@ -177,7 +182,7 @@ def advance_book(original, frame, artifact, now):
                         if h['qty']<=0:del book['holdings'][symbol];state['entered'].pop(symbol,None)
                     else:
                         if symbol in book['holdings']:continue
-                        budget=min(book['cash']/(1+FEE),book['nav']*.1)
+                        budget=min(book['cash']/(1+FEE),book['nav']*artifact.get('max_weight',.1))
                         qty=min(cap,int(budget/px))
                         if qty<=0:continue
                         book['cash']-=qty*px*(1+FEE)
@@ -192,19 +197,19 @@ def advance_book(original, frame, artifact, now):
     if not math.isfinite(book['nav']) or book['cash']<-.000001:raise ValueError('분봉 장부 잔고 오류')
     ready=latest[latest.ready].copy()
     ready=ready[[fresh(row) and stamp(row)>state['activated'] and stamp(row)>state['last_processed'].get(s,0) for s,row in ready.iterrows()]]
-    if len(ready) and state['pending'] is None and now-state['last_signal']>=HOLD_MINUTES*60 and local.hour*60+local.minute<900:
-        ready['score']=artifact['model'].predict(ready[FEATURES].to_numpy())
+    if len(ready) and state['pending'] is None and now-state['last_signal']>=horizon*60 and local.hour*60+local.minute<900:
+        ready['score']=artifact['model'].predict(ready[artifact.get('fields',FEATURES)].to_numpy())
         # Expected gross return must clear both sides' cost and slippage.
-        picks=ready[ready.score.gt(2*(FEE+SLIPPAGE))].sort_values('score',ascending=False).head(10)
+        picks=ready[ready.score.gt(2*(FEE+SLIPPAGE))].sort_values('score',ascending=False).head(artifact.get('selection_count',10))
         selected=set(picks.index)
-        sells=[s for s in book['holdings'] if s not in selected and now-state['entered'].get(s,now)>=HOLD_MINUTES*60]
+        sells=[s for s in book['holdings'] if s not in selected and now-state['entered'].get(s,now)>=horizon*60]
         buys=[dict(symbol=s) for s in sorted(selected) if s not in book['holdings']]
         caps={s:max(0,int(float(latest.loc[s,'volume'])*PARTICIPATION))
               if math.isfinite(float(latest.loc[s,'volume'])) else 0 for s in set(sells)|selected}
         state['pending']=dict(created=now,sells=sells,buys=buys,caps=caps,strategy_id=artifact['strategy_id'])
         state['last_signal']=now
         state['last_processed'].update({s:stamp(row) for s,row in ready.iterrows()})
-    book['message']='분봉 페이퍼 · 별도 분봉 학습/다음 관측 종가 체결 · 최소 보유 30분 · 일봉 OS 인증 미승계'
+    book['message']=f'분봉 페이퍼 · 별도 분봉 학습/다음 관측 종가 체결 · 최소 보유 {horizon}분 · 일봉 OS 인증 미승계'
     book['last_minute']=local.strftime('%Y%m%d%H%M')
     day=local.strftime('%Y%m%d');point=dict(date=day,net_return=book['nav']/book['initial']-1)
     if book['equity'] and book['equity'][-1]['date']==day:book['equity'][-1]=point

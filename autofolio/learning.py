@@ -19,9 +19,9 @@ _PROGRESS=None
 def domains(market):
     if market not in ('kr','us','crypto','timefolio'):raise ValueError('지원하지 않는 연구소')
     return dict(model=['ridge','extra_trees','hist_gradient_boosting',*NEURAL_MODELS],
-        feature_set=['price','price_volume','price_risk','all','ohlc','volume'],lookback=[5,10,20,40],
+        feature_set=['price','price_volume','price_risk','all','ohlc','volume','downside_risk','liquidity'],lookback=[5,10,20,40,60],
         holding_sessions=[1,3,5] if market=='timefolio' else [5,10,20],selection_count=[5,10,20],
-        training_days=[180,365,730,1095],seed=[20261008],regularization=[.1,1.,10.],max_depth=[3,5,8],
+        training_days=[90,180,365,730,1095],seed=[20261008],regularization=[.01,.1,1.,10.,100.],max_depth=[2,3,5,8,12],
         model_size=['compact','large'],sequence_length=[20,60],epochs=[10,30],batch_size=[128,256],learning_rate=[.0003,.001],
         retrain_months=[1,3,6],buy_rule=['top_k','positive_score','top_quantile'],sell_rule=['rebalance','stop_take','signal_exit'],
         position_sizing=['equal','inverse_volatility','score'],stop_loss=[.05,.1,.2],take_profit=[.1,.2,.4],
@@ -78,6 +78,13 @@ def features(prices,g,market,news_path=None):
     if g['feature_set']=='ohlc':names=['return_1','return_w','open_gap','high_move','low_move','body','range']
     if g['feature_set']=='volume':names=['volume_ratio','volume_change','volume_rank','return_1']
     if g['feature_set']=='all':names+=['open_gap','high_move','low_move','volume_rank','volume_change']
+    if g['feature_set']=='downside_risk':
+        p['downside_vol']=p.return_1.clip(upper=0).pow(2).groupby(p.symbol).transform(lambda s:s.rolling(w).mean()).pow(.5)
+        p['drawdown']=p.close/grouped.close.transform(lambda s:s.rolling(w).max())-1
+        names=['return_1','return_w','trend','downside_vol','drawdown']
+    if g['feature_set']=='liquidity':
+        p['illiquidity']=(p.return_1.abs()/value.replace(0,np.nan)).groupby(p.symbol).transform(lambda s:s.rolling(w).mean())
+        names=['return_1','return_w','volume_ratio','volume_rank','illiquidity']
     if g.get('news_mode','off')!='off':
         import pyarrow.parquet as pq
         if news_path is None:

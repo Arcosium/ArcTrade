@@ -115,9 +115,10 @@ def test_admin_connections_are_encrypted_and_never_public(client):
            'account_no': '12345678', 'account_product': '01', 'mode': 'live'}
     tf = {'username': 'example-timefolio', 'password': 'example-tf-password'}
     log_in(client)
-    response = client.post('/api/auth/connections', headers=HEADERS, json={'kis': kis, 'timefolio': tf})
+    response = client.post('/api/auth/connections', headers=HEADERS, json={'timefolio': tf})
     assert response.status_code == 200
-    assert auth.get_connection(1, 'kis-live') == kis
+    assert client.post('/api/auth/connections',headers=HEADERS,json={'kis':kis}).status_code == 410
+    assert auth.get_connection(1, 'kis-live') is None
     assert auth.get_connection(1, 'timefolio') == tf
     with auth.connect() as db:
         stored = b''.join(row['secret'] for row in db.execute('SELECT secret FROM connections'))
@@ -125,7 +126,7 @@ def test_admin_connections_are_encrypted_and_never_public(client):
     assert b'12345678' not in stored
     assert b'example-tf-password' not in stored
     metadata = client.get('/api/auth/connections').json()
-    assert metadata == {'connections': [{'kind': 'kis-live', 'configured': True}, {'kind': 'timefolio', 'configured': True}]}
+    assert metadata == {'connections': [{'kind': 'timefolio', 'configured': True}]}
     client.post('/api/auth/logout', headers=HEADERS)
     assert client.get('/api/auth/connections').status_code == 401
 

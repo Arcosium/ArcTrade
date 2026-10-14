@@ -1,0 +1,15 @@
+[Unit]
+Description=ArcTrade current Pareto forward paper accounts
+After=network-online.target
+[Service]
+WorkingDirectory=/home/arcosium/projects/ArcTrade
+ExecStart=/usr/bin/python3 -m autofolio.frontier
+Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+CPUQuota=100%
+MemoryMax=4G
+Nice=10
+Restart=on-failure
+RestartSec=15
+UMask=0077
+[Install]
+WantedBy=default.target

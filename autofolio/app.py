@@ -108,6 +108,7 @@ def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",patt
     points.sort(key=lambda r:(-r['net_return'],r['negative_months']))
     from .map_references import references
     mapped=references(market,user(request),chosen)
+    if market=='crypto':mapped['points']=[]
     for point in points:point['applied_targets']=mapped['assignments'].get(point['id'],[])
     board=dict(cohort=selected,cohorts=cohorts,strategies=points,total=len(all_rows),
                 references=mapped['points'],
@@ -115,6 +116,12 @@ def leaderboard(request:Request,cohort: str|None=None,market:str=Query("kr",patt
                 screened_frontier=[r['id'] for r in frontier(screened)],
                 period_label=((' ~ '.join([chosen[0]['start'],chosen[0]['end']])+' · OS 9개월') if chosen else 'OS 9개월 · 첫 검증 대기'), comparison='OS 9개월',selection_scope='os',protocol=research.protocol(market))
     # The map polls every few seconds; an unchanged board is answered without its body.
+    if market=='kr':
+        with connect() as db:
+            try:minute_checks={r[0]:json.loads(r[1]) for r in db.execute('SELECT strategy_id,body FROM minute_validation')}
+            except Exception:minute_checks={}
+        for point in board['strategies']:point['minute_validation']=minute_checks.get(point['id'],dict(state='queued'))
+        board['minute_validation_status']=setting('minute_validation_status',{})
     version=hashlib.sha256(json.dumps(board,sort_keys=True,default=str).encode()).hexdigest()[:20]
     return dict(unchanged=True,version=version) if known==version else dict(board,version=version)
 

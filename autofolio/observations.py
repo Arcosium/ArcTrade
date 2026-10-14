@@ -22,8 +22,16 @@ def initialize():
 
 def stock_quotes(symbols, market):
     """Use indexed per-symbol queries; do not scan or write collector databases."""
-    if market != 'kr':
-        return {}  # US history is a delayed archive, not an intraday quote feed.
+    if market=='us':
+        path=Path.home()/'vault/CryptoBars/data/USA/realtime.db'
+        if not path.exists():return {}
+        with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=2)) as db:
+            result={}
+            for symbol in symbols:
+                row=db.execute('SELECT ts,last FROM quotes WHERE symbol=?',(symbol.split('@')[0],)).fetchone()
+                if row and math.isfinite(row[1]) and row[1]>0:result[symbol]=dict(ts=row[0],last=row[1])
+        return result
+    if market!='kr':return {}
     path = Path.home() / 'vault/CryptoBars/data/KRX/bars.db'
     result = {}
     if not path.exists(): return result

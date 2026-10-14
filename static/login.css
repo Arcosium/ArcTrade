@@ -1,13 +1,15 @@
 @font-face{font-family:Noto;src:url('/static/fonts/NotoSansKR.woff2') format('woff2');font-display:swap}
 *{box-sizing:border-box}
-body{margin:0;background:#0b0d10;color:#d7dbe0;font:15px/1.7 Noto,'Noto Sans KR',sans-serif;word-break:keep-all}
-header{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:10px 26px;border-bottom:1px solid #2a3038;background:#0f1216}
-a{color:#adb6c0;text-underline-offset:4px}.brand{font:700 20px monospace;letter-spacing:.02em;color:#fff;text-decoration:none}
+body{margin:0;background:#f5f6fa;color:#202431;font:15px/1.7 Noto,'Noto Sans KR',sans-serif;word-break:keep-all}
+header{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:10px 26px;border-bottom:1px solid #e0e3ed;background:#ffffff}
+a{color:#626878;text-underline-offset:4px}.brand{font:700 20px monospace;letter-spacing:.02em;color:#202431;text-decoration:none}
 main{min-height:calc(100dvh - 58px);display:grid;align-items:center;padding:56px 24px}.access{width:100%;max-width:430px;margin:0 auto}
-h1{font-size:25px;line-height:1.4;letter-spacing:-.6px;margin:0 0 16px}.intro{color:#adb6c0;margin:0 0 32px;font-size:14px}
-label{display:block;margin:22px 0 9px;font-size:14px;color:#adb6c0}
-input{width:100%;min-height:49px;padding:10px 14px;border:1px solid #454e58;border-radius:0;background:#12161b;color:#d7dbe0;font:inherit}
-input:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #f5b942;outline-offset:4px}
-.submit{min-height:50px;width:100%;margin-top:30px;background:#f5b942;color:#0b0d10;border:1px solid #f5b942;font:500 15px Noto,sans-serif;cursor:pointer}
-.submit:disabled{opacity:.65;cursor:wait}#message{min-height:48px;font-size:14px;color:#f5b942;margin:18px 0 0}
+h1{font-size:25px;line-height:1.4;letter-spacing:-.6px;margin:0 0 16px}.intro{color:#626878;margin:0 0 32px;font-size:14px}
+label{display:block;margin:22px 0 9px;font-size:14px;color:#626878}
+input{width:100%;min-height:49px;padding:10px 14px;border:1px solid #e0e3ed;border-radius:0;background:#ffffff;color:#202431;font:inherit}
+input:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #575cb0;outline-offset:4px}
+.submit{min-height:50px;width:100%;margin-top:30px;background:#575cb0;color:#f5f6fa;border:1px solid #575cb0;font:500 15px Noto,sans-serif;cursor:pointer}
+.submit:disabled{opacity:.65;cursor:wait}#message{min-height:48px;font-size:14px;color:#575cb0;margin:18px 0 0}
 @media(max-width:480px){header{padding:12px 20px;font-size:13px;gap:12px}main{align-items:start;padding:64px 24px 24px}h1{font-size:23px}}
+
+.access{padding:32px;background:white;border:1px solid #e0e3ed;border-radius:8px}.submit{color:#fff;border-radius:5px}input{border-radius:5px}body{color-scheme:light}
